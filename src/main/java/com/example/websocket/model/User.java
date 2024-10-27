@@ -2,6 +2,7 @@ package com.example.websocket.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import java.util.*;
 
 @Entity
 @Getter
@@ -14,5 +15,7 @@ public class User {
     private Long id;
     private String username;
 
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<ChatRoomUser> chatRoomUsers;
 }
 

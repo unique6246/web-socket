@@ -1,4 +1,3 @@
-// Message.java
 package com.example.websocket.model;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
