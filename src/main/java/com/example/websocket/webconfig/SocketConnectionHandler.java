@@ -34,7 +34,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
 
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    public void afterConnectionEstablished(WebSocketSession session) {
         // Extract username from session attributes (set in the HandshakeInterceptor)
         String username = (String) session.getAttributes().get("username");
         if (username != null) {
@@ -74,7 +74,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
 
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         // Remove user from the session map on disconnect
         String username = (String) session.getAttributes().get("username");
         if (username != null) {

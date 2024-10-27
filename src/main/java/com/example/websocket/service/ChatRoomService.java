@@ -1,7 +1,6 @@
 package com.example.websocket.service;
 
-import com.example.websocket.model.ChatRoom;
-import com.example.websocket.model.Message;
+import com.example.websocket.model.*;
 import com.example.websocket.model.User;
 import com.example.websocket.repo.*;
 
@@ -10,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 

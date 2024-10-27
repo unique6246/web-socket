@@ -11,12 +11,7 @@ import java.util.List;
 public class ChatServiceIml {
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
     private MessageRepository messageRepository;
-    @Autowired
-    private ChatRoomRepository c;
 
     public List<Message> getMessagesByChatRoom(ChatRoom chatRoom) {
         return messageRepository.findMessagesByChatRoom(chatRoom);
