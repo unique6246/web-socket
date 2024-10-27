@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Private Chat</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Custom styling for chat interface */
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        #messages {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            width: fit-content;
+            max-width: 70%;
+        }
+        .message.sender {
+            background-color: #308D46;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .message.receiver {
+            background-color: #007bff;
+            color: white;
+            align-self: flex-start;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="row">
+        <div class="col">
+            <input type="text" id="username" class="form-control mb-2" placeholder="Your Username">
+            <input type="text" id="room" class="form-control mb-2" placeholder="Room Name">
+            <button id="connectButton" class="btn btn-primary" onclick="connect()">Connect</button>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <input type="text" id="message" class="form-control mb-2" placeholder="Type a message">
+            <button class="btn btn-success" onclick="sendMessage()">Send Message</button>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div id="messages" class="border p-3"></div>
+        </div>
+    </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
