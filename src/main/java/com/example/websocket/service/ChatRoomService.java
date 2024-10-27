@@ -45,8 +45,4 @@ public class ChatRoomService {
             return chatRoomRepository.save(newRoom);
         }
     }
-
-    public List<Message> getMessagesByChatRoom(ChatRoom chatRoom) {
-        return chatRoom.getMessages();
-    }
 }

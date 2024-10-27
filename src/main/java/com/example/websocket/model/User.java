@@ -3,8 +3,6 @@ package com.example.websocket.model;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.util.List;
-
 @Entity
 @Getter
 @Setter
@@ -16,8 +14,5 @@ public class User {
     private Long id;
     private String username;
 
-    public User(String sender) {
-        this.username = sender;
-    }
 }
 

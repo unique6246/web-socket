@@ -2,11 +2,9 @@ package com.example.websocket.webconfig;
 
 import com.example.websocket.model.ChatRoom;
 import com.example.websocket.model.Message;
-import com.example.websocket.model.User;
 import com.example.websocket.repo.MessageRepository;
 import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.ChatRoomService;
-import com.example.websocket.service.ChatServiceIml;
 import org.json.JSONObject;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -15,7 +13,6 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
