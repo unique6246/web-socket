@@ -7,25 +7,24 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
-
 @Entity
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class Message {
+@Table(name = "chat_room_user", uniqueConstraints = @UniqueConstraint(columnNames = {"chatroom_id", "user_id"}))
+public class ChatRoomUser {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String content;
-    private String sender;
-    private LocalDateTime timestamp;
-
-    @ManyToOne
-    @JoinColumn(name = "chatroom_id")
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "chatroom_id", nullable = false)
     @JsonBackReference
     private ChatRoom chatRoom;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 }

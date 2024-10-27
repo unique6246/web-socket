@@ -1,4 +1,4 @@
-package com.example.websocket.webconfig;
+package com.example.websocket.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;

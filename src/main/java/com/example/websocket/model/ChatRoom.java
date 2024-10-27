@@ -1,4 +1,3 @@
-// ChatRoom.java
 package com.example.websocket.model;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
@@ -16,8 +15,8 @@ import java.util.Set;
 @Entity
 @Getter
 @Setter
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 public class ChatRoom {
 
     @Id
@@ -27,13 +26,9 @@ public class ChatRoom {
     @Column(unique = true, nullable = false)
     private String roomName;
 
-    @ManyToMany
-    @JoinTable(
-            name = "chatroom_users",
-            joinColumns = @JoinColumn(name = "chatroom_id"),
-            inverseJoinColumns = @JoinColumn(name = "user_id")
-    )
-    private Set<User> users = new HashSet<>();
+    @OneToMany(mappedBy = "chatRoom", cascade = CascadeType.PERSIST, orphanRemoval = true)
+    @JsonManagedReference
+    private Set<ChatRoomUser> chatRoomUsers = new HashSet<>();
 
     @OneToMany(mappedBy = "chatRoom", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
