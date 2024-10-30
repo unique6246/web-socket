@@ -1,17 +1,14 @@
 package com.example.websocket.config;
 
-import com.example.websocket.model.*;
 import com.example.websocket.repo.*;
 import com.example.websocket.service.ChatRoomService;
 import org.json.JSONObject;
-import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,11 +23,9 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     private static final Map<String, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
 
     private final ChatRoomService chatRoomService;
-    private final MessageRepository chatMessageRepository;
 
-    public SocketConnectionHandler(ChatRoomService chatRoomService, MessageRepository chatMessageRepository) {
+    public SocketConnectionHandler(ChatRoomService chatRoomService) {
         this.chatRoomService = chatRoomService;
-        this.chatMessageRepository = chatMessageRepository;
     }
 
     @Override
@@ -51,26 +46,27 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         try {
             JSONObject jsonMessage = new JSONObject(message.getPayload());
 
             String sender = jsonMessage.optString("sender", null);
             String roomName = jsonMessage.optString("room", null);
             String msgContent = jsonMessage.optString("message", null);
+            String fileUrl = jsonMessage.optString("fileUrl", null);
+            String fileType = jsonMessage.optString("fileType", null);
+            String fileName = jsonMessage.optString("fileName", null);
 
-            if (sender == null || roomName == null || msgContent == null) {
-                System.err.println("Invalid message format from session: " + session.getId());
-                return;
-            }
-
-            chatRoomService.saveMessage(roomName, sender, msgContent);
+            chatRoomService.saveMessage (roomName, sender, msgContent, fileUrl, fileType, fileName);
 
 
 
             JSONObject sendMessage = new JSONObject();
             sendMessage.put("sender", sender);
             sendMessage.put("message", msgContent);
+            sendMessage.put("fileUrl", fileUrl);
+            sendMessage.put("fileType", fileType);
+            sendMessage.put("fileName", fileName);
 
             Set<WebSocketSession> roomUsers = roomSessions.get(roomName);
             if (roomUsers != null) {

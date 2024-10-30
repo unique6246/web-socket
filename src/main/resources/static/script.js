@@ -118,7 +118,12 @@ function startChat(roomName) {
     socket.onmessage = function (event) {
         console.log("Received message:", event.data);
         const message = JSON.parse(event.data);
-        displayMessage(message.sender, message.message, message.sender === username);
+        if(message.isFile){
+            displayFileMessage(message.sender,message.message)
+        }
+        else{
+            displayMessage(message.sender, message.message, message.sender === username);
+        }
     };
 
     socket.onclose = function () {
@@ -133,6 +138,42 @@ function startChat(roomName) {
     sendMessageButton.removeEventListener("click", sendMessageHandler);
     sendMessageButton.addEventListener("click", sendMessageHandler);
 }
+
+// Attach file input listener
+document.getElementById("fileInput").addEventListener("change", handleFileUpload);
+
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Create a FormData object to send the file as multipart data
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("room", currentRoomName); // Add room to keep track of the chat room
+
+    fetch("http://localhost:8080/api/files/upload", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${sessionStorage.getItem("token")}`,
+        },
+        body: formData,
+    })
+        .then(response => response.json())
+        .then(data => {
+            // Send the file URL as a message through WebSocket
+            const message = {
+                sender: sessionStorage.getItem("username"),
+                room: currentRoomName,
+                message: `File: ${data.fileUrl}`, // File URL from the server response
+                isFile: true, // Mark this message as a file
+            };
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
+        })
+        .catch(error => console.error("File upload failed:", error));
+}
+
 
 // Function to handle sending messages
 function sendMessageHandler() {
@@ -197,6 +238,22 @@ function displayMessage(sender, messageText, isSender = false) {
     messageElement.className = "message " + (isSender ? "sender" : "receiver");
     messageElement.textContent = (isSender ? "You: " : sender + ": ") + messageText;
     messagesDiv.appendChild(messageElement);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// Function to display a file message with a download link
+function displayFileMessage(sender, fileUrl) {
+    const messagesDiv = document.getElementById("messages");
+    const fileMessageElement = document.createElement("div");
+    fileMessageElement.className = "message";
+
+    const link = document.createElement("a");
+    link.href = fileUrl;
+    link.target = "_blank";
+    link.textContent = `${sender} sent a file: ${fileUrl.split("/").pop()}`; // Display file name
+
+    fileMessageElement.appendChild(link);
+    messagesDiv.appendChild(fileMessageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 

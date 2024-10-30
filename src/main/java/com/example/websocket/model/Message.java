@@ -25,6 +25,11 @@ public class Message implements Serializable {
     private String sender;
     private LocalDateTime timestamp;
 
+    //files
+    private String fileUrl;
+    private String fileType;
+    private String fileName;
+
     @ManyToOne
     @JoinColumn(name = "chatroom_id")
     @JsonBackReference

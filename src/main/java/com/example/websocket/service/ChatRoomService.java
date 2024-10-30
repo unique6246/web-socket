@@ -43,13 +43,18 @@ public class ChatRoomService {
 
     @Transactional
     @CacheEvict(value = "chatMessagesByRoom", key = "#roomName")
-    public void saveMessage(String roomName, String sender, String content) {
+    public void saveMessage(String roomName, String sender, String msgContent, String fileUrl, String fileType, String fileName) {
         ChatRoom chatRoom = chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
 
         Message msg = new Message();
-        msg.setContent(content);
+        msg.setContent(msgContent);
         msg.setSender(sender);
+
+        msg.setFileUrl(fileUrl);
+        msg.setFileType(fileType);
+        msg.setFileName(fileName);
+
         msg.setChatRoom(chatRoom);
         msg.setTimestamp(LocalDateTime.now());
 

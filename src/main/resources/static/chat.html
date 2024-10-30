@@ -18,6 +18,10 @@
         <h3 id="chatRoomTitle">Chat Room</h3>
         <button id="leaveRoomButton" style="display:none;">Leave Chat</button> <!-- Leave Chat button -->
         <div id="messages" class="messages-container"></div>
+
+        <input type="file" id="fileInput" style="display: none;" />
+        <button onclick="document.getElementById('fileInput').click()">Attach File</button>
+
         <input type="text" id="messageInput" placeholder="Type a message..." required>
         <button id="sendMessageButton">Send</button>
     </div>
