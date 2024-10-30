@@ -4,6 +4,7 @@ import com.example.websocket.model.*;
 import com.example.websocket.repo.*;
 import com.example.websocket.service.ChatRoomService;
 import org.json.JSONObject;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -26,12 +27,10 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
 
     private final ChatRoomService chatRoomService;
     private final MessageRepository chatMessageRepository;
-    private final UserRepository userRepository;
 
-    public SocketConnectionHandler(ChatRoomService chatRoomService, MessageRepository chatMessageRepository, UserRepository userRepository) {
+    public SocketConnectionHandler(ChatRoomService chatRoomService, MessageRepository chatMessageRepository) {
         this.chatRoomService = chatRoomService;
         this.chatMessageRepository = chatMessageRepository;
-        this.userRepository = userRepository;
     }
 
     @Override
@@ -65,14 +64,9 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
                 return;
             }
 
-            ChatRoom chatRoom = chatRoomService.createOrUpdateChatRoom(roomName, userRepository.findByUsername(sender).getId());
+            chatRoomService.saveMessage(roomName, sender, msgContent);
 
-            Message msg = new Message();
-            msg.setContent(msgContent);
-            msg.setSender(sender);
-            msg.setChatRoom(chatRoom);
-            msg.setTimestamp(LocalDateTime.now());
-            chatMessageRepository.save(msg);
+
 
             JSONObject sendMessage = new JSONObject();
             sendMessage.put("sender", sender);
@@ -94,7 +88,6 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
             System.err.println("Error handling message: " + e.getMessage());
         }
     }
-
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {

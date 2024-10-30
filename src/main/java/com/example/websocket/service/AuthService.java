@@ -4,6 +4,7 @@ package com.example.websocket.service;
 import com.example.websocket.model.*;
 import com.example.websocket.repo.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -32,6 +33,7 @@ public class AuthService implements UserDetailsService {
 
 
     @Override
+    @Cacheable(value = "userDetails", key = "#username")
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUsername(username);
         if (user == null) {
@@ -42,7 +44,6 @@ public class AuthService implements UserDetailsService {
                 .collect(Collectors.toList());
         return new org.springframework.security.core.userdetails.User(user.getUsername(), user.getPassword(), authorities);
     }
-
 
 
     public ResponseEntity<?> registerUser(User registrationRequest) {

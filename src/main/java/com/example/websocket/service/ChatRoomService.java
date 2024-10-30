@@ -1,17 +1,18 @@
 package com.example.websocket.service;
 
 import com.example.websocket.model.*;
-import com.example.websocket.model.User;
 import com.example.websocket.repo.*;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 @Service
 public class ChatRoomService {
@@ -28,15 +29,12 @@ public class ChatRoomService {
     @Autowired
     private MessageRepository messageRepository;
 
-    public Set<User> getUsersByRoomName(String roomName) {
-        return chatRoomUserRepository.findUsersByRoomName(roomName);
-    }
-
+    @Cacheable(value = "chatRoomsByName", key = "#username")
     public List<String> getRoomsByUserName(String username) {
         return chatRoomUserRepository.findRoomNamesByUsername(username);
     }
 
-
+    @Cacheable(value = "chatMessagesByRoom", key = "#roomName")
     public List<Message> getMessagesByRoomName(String roomName) {
         ChatRoom chatRoom = chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
@@ -44,7 +42,25 @@ public class ChatRoomService {
     }
 
     @Transactional
-    public ChatRoom createOrUpdateChatRoom(String roomName, Long userId) {
+    @CacheEvict(value = "chatMessagesByRoom", key = "#roomName")
+    public void saveMessage(String roomName, String sender, String content) {
+        ChatRoom chatRoom = chatRoomRepository.findByRoomName(roomName)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
+
+        Message msg = new Message();
+        msg.setContent(content);
+        msg.setSender(sender);
+        msg.setChatRoom(chatRoom);
+        msg.setTimestamp(LocalDateTime.now());
+
+        // Save the message to the repository
+        messageRepository.save(msg);
+    }
+
+    @Transactional
+    @CacheEvict(value = "chatRoomsByName", key = "#username")
+    public ChatRoom createOrUpdateChatRoom(String roomName, String username) {
+        Long userId = userRepository.findByUsername(username).getId();
         Optional<ChatRoom> chatRoomOptional = chatRoomRepository.findByRoomName(roomName);
         ChatRoom room;
 
@@ -80,6 +96,4 @@ public class ChatRoomService {
         }
         return room;
     }
-
-
 }

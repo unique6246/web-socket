@@ -11,8 +11,8 @@ document.getElementById("loginForm")?.addEventListener("submit", function (e) {
     })
         .then(response => response.json())
         .then(data => {
-            localStorage.setItem("token", data.token);
-            localStorage.setItem("username", username);
+            sessionStorage.setItem("token", data.token);
+            sessionStorage.setItem("username", username);
             window.location.href = "chat.html";
         })
         .catch(error => alert("Login failed: " + error.message));
@@ -44,7 +44,7 @@ document.getElementById("createRoomButton")?.addEventListener("click", function 
 
     fetch(`http://localhost:8080/api/chat/rooms/create/${roomName}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem("token")}` }
+        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
     })
         .then(response => response.json())
         .then(data => {
@@ -57,7 +57,7 @@ document.getElementById("createRoomButton")?.addEventListener("click", function 
 // Load rooms and display them as clickable buttons
 function loadRooms() {
     fetch("http://localhost:8080/api/rooms", {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem("token")}` }
+        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
     })
         .then(response => response.json())
         .then(rooms => {
@@ -84,8 +84,8 @@ let currentRoomName = null;
 
 // Function to start chat in a selected room
 function startChat(roomName) {
-    const token = localStorage.getItem("token");
-    const username = localStorage.getItem("username");
+    const token = sessionStorage.getItem("token");
+    const username = sessionStorage.getItem("username");
 
     if (!token || !username) {
         alert("Please log in to join a room");
@@ -137,10 +137,17 @@ function startChat(roomName) {
 // Function to handle sending messages
 function sendMessageHandler() {
     const messageInput = document.getElementById("messageInput");
+    const messageText = messageInput.value.trim(); // Trim whitespace from input
+
+    if (!messageText) {
+        alert("Message cannot be empty."); // Optionally, display an alert or handle it as needed
+        return; // Exit the function if the message is empty
+    }
+
     const message = {
-        sender: localStorage.getItem("username"),
+        sender: sessionStorage.getItem("username"),
         room: currentRoomName,
-        message: messageInput.value
+        message: messageText
     };
 
     console.log("Sending message:", message);
@@ -172,13 +179,13 @@ document.getElementById("leaveRoomButton")?.addEventListener("click", leaveChat)
 // Load chat history for a specific room
 function loadChatHistory(roomName) {
     fetch(`/api/chat/history/${roomName}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem("token")}` }
+        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
     })
         .then(response => response.json())
         .then(messages => {
             const messagesDiv = document.getElementById("messages");
             messagesDiv.innerHTML = '';
-            messages.forEach(msg => displayMessage(msg.sender, msg.content, msg.sender === localStorage.getItem("username")));
+            messages.forEach(msg => displayMessage(msg.sender, msg.content, msg.sender === sessionStorage.getItem("username")));
         })
         .catch(error => console.error("Error loading chat history:", error));
 }

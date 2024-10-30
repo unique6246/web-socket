@@ -18,13 +18,11 @@ public class ChatController {
     private final ChatRoomService chatRoomService;
     private final JwtService jwtService;
     private final JwtUtil jwtUtil;
-    private final UserRepository userRepository;
 
-    public ChatController(ChatRoomService chatRoomService, JwtService jwtService, JwtUtil jwtUtil, UserRepository userRepository) {
+    public ChatController(ChatRoomService chatRoomService, JwtService jwtService, JwtUtil jwtUtil) {
         this.chatRoomService = chatRoomService;
         this.jwtService = jwtService;
         this.jwtUtil = jwtUtil;
-        this.userRepository = userRepository;
     }
 
     @PostMapping("/rooms/create/{roomName}")
@@ -32,7 +30,7 @@ public class ChatController {
         String token = jwtService.extractToken(request);
         String username=jwtUtil.extractUsername(token);
 
-        return chatRoomService.createOrUpdateChatRoom(roomName, userRepository.findByUsername(username).getId() );
+        return chatRoomService.createOrUpdateChatRoom(roomName, username );
     }
 
     @GetMapping("/history/{roomName}")
