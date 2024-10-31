@@ -36,7 +36,6 @@ public class FileStorageService {
             Path targetLocation = this.fileStorageLocation.resolve(fileName);
             Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
 
-            System.out.println(fileName);
             // Return the URL to access the file
             return "/uploads/" + fileName; // Assuming the WebMvcConfig allows access to /uploads
         } catch (IOException ex) {

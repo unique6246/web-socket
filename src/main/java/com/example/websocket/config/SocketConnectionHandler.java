@@ -39,8 +39,6 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
             // Track user session in the new room
             userSessions.put(username, session);
             roomSessions.computeIfAbsent(roomName, k -> new CopyOnWriteArraySet<>()).add(session);
-
-            System.out.println("User " + username + " connected to room " + roomName);
         }
     }
 
@@ -93,7 +91,6 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         if (username != null) {
             // Remove user session when they disconnect
             removeUserSession(username, roomName);
-            System.out.println("User " + username + " disconnected");
         }
     }
 
@@ -107,9 +104,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
             // Close previous session
             try {
                 existingSession.close();
-                System.out.println("Disconnected user " + username + " from previous room " + previousRoomName);
-            } catch (Exception e) {
-                System.err.println("Failed to close session for user " + username + ": " + e.getMessage());
+            } catch (Exception ignored) {
             }
         }
     }

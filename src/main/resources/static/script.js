@@ -111,7 +111,6 @@ function startChat(roomName) {
 }
 
 function initializeChat(roomName) {
-    console.log("Connected to room:", roomName);
     document.getElementById("chatWindow").style.display = "block";
     document.getElementById("chatRoomTitle").textContent = `Chat Room: ${roomName}`;
     document.getElementById("leaveRoomButton").style.display = "inline";
@@ -169,7 +168,6 @@ function sendMessage() {
 }
 
 function endChat() {
-    console.log("Disconnected from room:", currentRoomName);
     if (socket) {
         socket.close(); // Ensure WebSocket is closed
         socket = null;
@@ -265,8 +263,3 @@ function loadInitialRoomMessages() {
         .then(rooms => {displayRooms(rooms)})
         .catch(error => console.error("Error loading rooms:", error));
 }
-
-
-
-
-
