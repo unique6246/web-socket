@@ -1,6 +1,5 @@
 package com.example.websocket.config;
 
-import com.example.websocket.repo.*;
 import com.example.websocket.service.ChatRoomService;
 import org.json.JSONObject;
 import org.springframework.stereotype.Component;
@@ -64,6 +63,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
             JSONObject sendMessage = new JSONObject();
             sendMessage.put("sender", sender);
             sendMessage.put("message", msgContent);
+            sendMessage.put("roomName", roomName);
             sendMessage.put("fileUrl", fileUrl);
             sendMessage.put("fileType", fileType);
             sendMessage.put("fileName", fileName);

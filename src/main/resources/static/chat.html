@@ -9,23 +9,19 @@
 <body>
 <div class="container">
     <h2>Select or Create a Chat Room</h2>
-    <input type="text" id="roomNameInput" placeholder="Enter room name" required>
+    <input type="text" id="roomNameInput" placeholder="Enter room name" required aria-label="Room Name">
     <button id="createRoomButton">Create Room</button>
+    <div id="roomList" class="room-list scrollable">Loading rooms...</div>
 
-    <div id="roomList"></div> <!-- Container for room buttons -->
-
-    <div id="chatWindow" style="display:none;">
-        <h3 id="chatRoomTitle">Chat Room</h3>
-        <button id="leaveRoomButton" style="display:none;">Leave Chat</button> <!-- Leave Chat button -->
+    <div id="chatWindow" class="chat-window">
+        <h2 id="chatRoomTitle">Chat Room</h2>
         <div id="messages" class="messages-container"></div>
-
-        <input type="file" id="fileInput" style="display: none;" />
-        <button onclick="document.getElementById('fileInput').click()">Attach File</button>
-
-        <input type="text" id="messageInput" placeholder="Type a message..." required>
+        <input type="text" id="messageInput" placeholder="Type a message..." required aria-label="Message Input">
         <button id="sendMessageButton">Send</button>
+        <button id="attachFileButton" aria-label="Attach File">Attach File</button>
+        <button id="leaveRoomButton" style="display: none;" aria-label="Leave Room">Leave Room</button>
+        <input type="file" id="fileInput" style="display: none;">
     </div>
-
 </div>
 <script src="script.js"></script>
 </body>

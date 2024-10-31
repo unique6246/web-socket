@@ -38,7 +38,7 @@ public class FileStorageService {
 
             System.out.println(fileName);
             // Return the URL to access the file
-            return "uploads/" + fileName; // Assuming the WebMvcConfig allows access to /uploads
+            return "/uploads/" + fileName; // Assuming the WebMvcConfig allows access to /uploads
         } catch (IOException ex) {
             throw new RuntimeException("Could not store file " + fileName, ex);
         }

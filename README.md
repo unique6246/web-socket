@@ -127,7 +127,7 @@ POST /api/files/upload
 The chat application uses WebSocket for real-time communication, allowing users to send and receive messages instantly. Below are the key components and methods for managing WebSocket connections.
 
 ```
-•	ws://localhost:8080/ws: The WebSocket server endpoint.
+•ws://localhost:8080/ws: The WebSocket server endpoint.
 ```
 ### onopen Event
 `Triggered when the connection is successfully established`

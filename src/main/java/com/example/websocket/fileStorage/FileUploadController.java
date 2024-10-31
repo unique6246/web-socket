@@ -27,8 +27,11 @@ public class FileUploadController {
         try {
             // Store the file and get the URL
             String fileUrl = fileStorageService.storeFile(file);
+            String fileName = file.getOriginalFilename();
             Map<String, String> response = new HashMap<>();
             response.put("fileUrl", fileUrl);
+            response.put("fileName", fileName);
+            response.put("type",file.getContentType());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

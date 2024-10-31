@@ -1,5 +1,31 @@
-// Login handling
-document.getElementById("loginForm")?.addEventListener("submit", function (e) {
+// Utility functions
+function getSessionToken() {
+    return sessionStorage.getItem("token");
+}
+
+function getSessionUsername() {
+    return sessionStorage.getItem("username");
+}
+
+function fetchWithAuth(url, options = {}) {
+    options.headers = {
+        ...options.headers,
+        'Authorization': `Bearer ${getSessionToken()}`,
+    };
+    return fetch(url, options).then(response => {
+        if (!response.ok) throw new Error("Failed request");
+        return response;
+    });
+}
+
+function handleError(error, customMessage = "An error occurred") {
+    alert(`${customMessage}: ${error.message}`);
+}
+
+let pollingInterval; // To store the polling interval ID
+
+// Login and Registration Handlers
+function handleLogin(e) {
     e.preventDefault();
     const username = document.getElementById("username").value;
     const password = document.getElementById("password").value;
@@ -9,17 +35,19 @@ document.getElementById("loginForm")?.addEventListener("submit", function (e) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
     })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error("Login failed");
+            return response.json();
+        })
         .then(data => {
             sessionStorage.setItem("token", data.token);
             sessionStorage.setItem("username", username);
             window.location.href = "chat.html";
         })
-        .catch(error => alert("Login failed: " + error.message));
-});
+        .catch(error => handleError(error, "Login failed"));
+}
 
-// Registration handling
-document.getElementById("registerForm")?.addEventListener("submit", function (e) {
+function handleRegister(e) {
     e.preventDefault();
     const username = document.getElementById("newUsername").value;
     const password = document.getElementById("newPassword").value;
@@ -29,233 +57,216 @@ document.getElementById("registerForm")?.addEventListener("submit", function (e)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
     })
-        .then(response => response.text())
+        .then(response => {
+            if (!response.ok) throw new Error("Registration failed");
+            return response.text();
+        })
         .then(message => {
             alert(message);
             window.location.href = "login.html";
         })
-        .catch(error => alert("Registration failed: " + error.message));
-});
+        .catch(error => handleError(error, "Registration failed"));
+}
 
-// Room creation
-document.getElementById("createRoomButton")?.addEventListener("click", function () {
+function createRoom() {
     const roomName = document.getElementById("roomNameInput").value;
     if (!roomName) return alert("Room name is required");
 
-    fetch(`http://localhost:8080/api/chat/rooms/create/${roomName}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
-    })
+    fetchWithAuth(`http://localhost:8080/api/chat/rooms/create/${roomName}`, { method: 'POST' })
         .then(response => response.json())
         .then(data => {
             alert(`Room '${data.roomName}' created successfully`);
-            loadRooms(); // Load the updated list of rooms if needed
+            return loadInitialRoomMessages();
         })
-        .catch(error => alert("Room creation failed: " + error.message));
-});
-
-// Load rooms and display them as clickable buttons
-function loadRooms() {
-    fetch("http://localhost:8080/api/rooms", {
-        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
-    })
-        .then(response => response.json())
-        .then(rooms => {
-            const roomList = document.getElementById("roomList");
-            roomList.innerHTML = ''; // Clear existing rooms
-            if (rooms.length === 0) {
-                roomList.textContent = "No rooms available.";
-            } else {
-                rooms.forEach(room => {
-                    const roomButton = document.createElement("button");
-                    roomButton.textContent = room.roomName;
-                    roomButton.className = "room-button";
-                    roomButton.addEventListener("click", () => startChat(room.roomName));
-                    roomList.appendChild(roomButton);
-                });
-            }
-        })
-        .catch(error => console.error("Failed to load rooms:", error));
+        .catch(error => handleError(error, "Room creation failed"));
 }
 
-// Global WebSocket and room state
+function displayRooms(rooms) {
+    const roomList = document.getElementById("roomList");
+    roomList.innerHTML = rooms.length ? '' : "No rooms available.";
+
+    rooms.forEach(room => {
+        const roomButton = document.createElement("button");
+        roomButton.textContent = room.roomName;
+        roomButton.className = "room-button";
+        roomButton.addEventListener("click", () => startChat(room.roomName));
+        roomList.appendChild(roomButton);
+    });
+}
+
+// Chat Management
 let socket;
 let currentRoomName = null;
 
-// Function to start chat in a selected room
 function startChat(roomName) {
-    const token = sessionStorage.getItem("token");
-    const username = sessionStorage.getItem("username");
+    if (!getSessionToken() || !getSessionUsername()) return alert("Please log in to join a room");
 
-    if (!token || !username) {
-        alert("Please log in to join a room");
-        return;
-    }
+    if (currentRoomName !== null) return alert("You must leave the current room before joining another one.");
 
-    // Prevent entering a new room if already connected to one
-    if (currentRoomName) {
-        alert("You must leave the current room before joining another one.");
-        return;
-    }
+    socket = new WebSocket(`ws://localhost:8080/ws?token=${getSessionToken()}&roomName=${roomName}`);
 
-    // Initialize WebSocket with token and roomName
-    socket = new WebSocket(`ws://localhost:8080/ws?token=${token}&roomName=${roomName}`);
+    socket.onopen = () => initializeChat(roomName);
+    socket.onmessage = event => handleIncomingMessage(event);
+    socket.onclose = () => endChat();
+}
 
-    socket.onopen = function () {
-        console.log("Connected to room:", roomName);
-        document.getElementById("chatWindow").style.display = "block";
-        document.getElementById("chatRoomTitle").textContent = `Chat Room: ${roomName}`;
-        document.getElementById("leaveRoomButton").style.display = "inline"; // Show the leave button
+function initializeChat(roomName) {
+    console.log("Connected to room:", roomName);
+    document.getElementById("chatWindow").style.display = "block";
+    document.getElementById("chatRoomTitle").textContent = `Chat Room: ${roomName}`;
+    document.getElementById("leaveRoomButton").style.display = "inline";
 
-        // Clear previous messages and load chat history for the new room
-        document.getElementById("messages").innerHTML = '';
-        loadChatHistory(roomName);
+    document.getElementById("messages").innerHTML = '';
+    currentRoomName = roomName;
+    loadChatHistory(roomName);
 
-        // Set current room name to track the active chat room
-        currentRoomName = roomName;
-    };
-
-    socket.onmessage = function (event) {
-        console.log("Received message:", event.data);
-        const message = JSON.parse(event.data);
-        if(message.isFile){
-            displayFileMessage(message.sender,message.message)
-        }
-        else{
-            displayMessage(message.sender, message.message, message.sender === username);
-        }
-    };
-
-    socket.onclose = function () {
-        console.log("Disconnected from room:", roomName);
-        document.getElementById("chatWindow").style.display = "none";
-        document.getElementById("leaveRoomButton").style.display = "none";
-        currentRoomName = null;
-    };
-
-    // Remove previous click listener and add new listener for sending messages
     const sendMessageButton = document.getElementById("sendMessageButton");
-    sendMessageButton.removeEventListener("click", sendMessageHandler);
-    sendMessageButton.addEventListener("click", sendMessageHandler);
+    sendMessageButton.onclick = sendMessage;
+
+    // Start polling for new messages
 }
 
-// Attach file input listener
-document.getElementById("fileInput").addEventListener("change", handleFileUpload);
+function handleIncomingMessage(event) {
+    const message = JSON.parse(event.data);
+    const roomName = message.roomName;
 
-function handleFileUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    // Create a FormData object to send the file as multipart data
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("room", currentRoomName); // Add room to keep track of the chat room
-
-    fetch("http://localhost:8080/api/files/upload", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${sessionStorage.getItem("token")}`,
-        },
-        body: formData,
-    })
-        .then(response => response.json())
-        .then(data => {
-            // Send the file URL as a message through WebSocket
-            const message = {
-                sender: sessionStorage.getItem("username"),
-                room: currentRoomName,
-                message: `File: ${data.fileUrl}`, // File URL from the server response
-                isFile: true, // Mark this message as a file
-            };
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify(message));
-            }
-        })
-        .catch(error => console.error("File upload failed:", error));
-}
-
-
-// Function to handle sending messages
-function sendMessageHandler() {
-    const messageInput = document.getElementById("messageInput");
-    const messageText = messageInput.value.trim(); // Trim whitespace from input
-
-    if (!messageText) {
-        alert("Message cannot be empty."); // Optionally, display an alert or handle it as needed
-        return; // Exit the function if the message is empty
+    if (roomName === currentRoomName) {
+        // Display the message in the chat
+        if (message.fileUrl && message.fileUrl.startsWith("/uploads/")) {
+            displayFileMessage(message.sender, message.fileUrl, message.sender === getSessionUsername());
+        } else {
+            displayMessage(message.sender, message.message, message.sender === getSessionUsername());
+        }
     }
+    return refreshRoomList(message.room);
 
-    const message = {
-        sender: sessionStorage.getItem("username"),
-        room: currentRoomName,
-        message: messageText
-    };
+}
+function refreshRoomList(activeRoomName) {
+    return loadInitialRoomMessages().then(() => {
+        // Move the active room to the top of the list
+        const roomList = document.getElementById("roomList");
+        const rooms = Array.from(roomList.children);
+        const activeRoom = rooms.find(room => room.textContent === activeRoomName);
 
-    console.log("Sending message:", message);
-    if (socket && socket.readyState === WebSocket.OPEN) {
+        if (activeRoom) {
+            roomList.prepend(activeRoom); // Move active room to the top
+        }
+    });
+}
+
+
+function sendMessage() {
+    const messageText = document.getElementById("messageInput").value.trim();
+    if (!messageText) return alert("Message cannot be empty.");
+    const message = { sender: getSessionUsername(), room: currentRoomName, message: messageText, isFile: false };
+
+    if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
-        // displayMessage("You", message.message, true);
-        messageInput.value = '';
+        document.getElementById("messageInput").value = ''; // Clear input after sending
     } else {
         console.error("Cannot send message; WebSocket is not open");
     }
 }
 
-// Function to leave the chat room
-function leaveChat() {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
-        console.log("Left chat room:", currentRoomName);
+function endChat() {
+    console.log("Disconnected from room:", currentRoomName);
+    if (socket) {
+        socket.close(); // Ensure WebSocket is closed
+        socket = null;
+    }
+    document.getElementById("chatWindow").style.display = "none";
+    document.getElementById("leaveRoomButton").style.display = "none";
+    document.getElementById("messages").innerHTML = ''; // Clear messages
+    currentRoomName = null;
+
     }
 
-    // Clear the room name to allow joining a new room
-    currentRoomName = null;
-    document.getElementById("chatWindow").style.display = "none";
-    document.getElementById("leaveRoomButton").style.display = "none"; // Hide leave button
-}
+// File Upload Handler
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
 
-// Attach leaveChat to the Leave button
-document.getElementById("leaveRoomButton")?.addEventListener("click", leaveChat);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("room", currentRoomName);
 
-// Load chat history for a specific room
-function loadChatHistory(roomName) {
-    fetch(`/api/chat/history/${roomName}`, {
-        headers: { 'Authorization': `Bearer ${sessionStorage.getItem("token")}` }
+    fetchWithAuth("http://localhost:8080/api/files/upload", {
+        method: "POST",
+        body: formData,
     })
         .then(response => response.json())
-        .then(messages => {
-            const messagesDiv = document.getElementById("messages");
-            messagesDiv.innerHTML = '';
-            messages.forEach(msg => displayMessage(msg.sender, msg.content, msg.sender === sessionStorage.getItem("username")));
-        })
-        .catch(error => console.error("Error loading chat history:", error));
+        .then(data => sendFileMessage(data.fileUrl, data.fileName, data.type, true))
+        .catch(error => console.error("File upload failed:", error));
 }
 
-// Display a message in the chat window
+function sendFileMessage(fileUrl, name, type, isFile) {
+    if (socket?.readyState === WebSocket.OPEN) {
+        const file = { sender: getSessionUsername(), room: currentRoomName, fileUrl: fileUrl, fileName: name, fileType: type, isFile: isFile };
+        socket.send(JSON.stringify(file));
+    }
+}
+
+// Display Helpers
 function displayMessage(sender, messageText, isSender = false) {
-    const messagesDiv = document.getElementById("messages");
     const messageElement = document.createElement("div");
-    messageElement.className = "message " + (isSender ? "sender" : "receiver");
-    messageElement.textContent = (isSender ? "You: " : sender + ": ") + messageText;
-    messagesDiv.appendChild(messageElement);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    messageElement.className = `message ${isSender ? "sender" : "receiver"}`;
+    messageElement.textContent = `${isSender ? "You" : sender}: ${messageText}`;
+    appendMessage(messageElement);
 }
 
-// Function to display a file message with a download link
-function displayFileMessage(sender, fileUrl) {
-    const messagesDiv = document.getElementById("messages");
+function displayFileMessage(sender, fileUrl, isSender = false) {
     const fileMessageElement = document.createElement("div");
-    fileMessageElement.className = "message";
+    fileMessageElement.className = `message ${isSender ? "sender" : "receiver"}`;
 
     const link = document.createElement("a");
     link.href = fileUrl;
     link.target = "_blank";
-    link.textContent = `${sender} sent a file: ${fileUrl.split("/").pop()}`; // Display file name
+    link.textContent = isSender ? `You sent a file: ${fileUrl.split("/").pop()}` : `${sender} sent a file: ${fileUrl.split("/").pop()}`;
 
     fileMessageElement.appendChild(link);
-    messagesDiv.appendChild(fileMessageElement);
+    appendMessage(fileMessageElement);
+}
+
+function appendMessage(messageElement) {
+    const messagesDiv = document.getElementById("messages");
+    messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
-// Load rooms on page load
-document.addEventListener("DOMContentLoaded", loadRooms);
+// Load Chat History
+function loadChatHistory(roomName) {
+    fetchWithAuth(`http://localhost:8080/api/chat/history/${roomName}`)
+        .then(response => response.json())
+        .then(messages => {
+            messages.forEach(msg => {
+                if (msg.fileUrl && msg.fileUrl.startsWith("/uploads/")) {
+                    displayFileMessage(msg.sender, msg.fileUrl, msg.sender === getSessionUsername());
+                } else {
+                    displayMessage(msg.sender, msg.content, msg.sender === getSessionUsername());
+                }
+            });
+        })
+        .catch(error => console.error("Error loading chat history:", error));
+}
+
+// Event Listeners
+document.getElementById("loginForm")?.addEventListener("submit", handleLogin);
+document.getElementById("registerForm")?.addEventListener("submit", handleRegister);
+document.getElementById("createRoomButton")?.addEventListener("click", createRoom);
+document.getElementById("fileInput")?.addEventListener("change", handleFileUpload);
+document.getElementById("leaveRoomButton")?.addEventListener("click", endChat);
+document.getElementById("attachFileButton")?.addEventListener("click", () => document.getElementById("fileInput").click());
+document.addEventListener("DOMContentLoaded", () => {
+    return loadInitialRoomMessages();
+});
+function loadInitialRoomMessages() {
+    return fetchWithAuth("http://localhost:8080/api/rooms") // Adjust this URL as necessary to get room messages
+        .then(response => response.json())
+        .then(rooms => {displayRooms(rooms)})
+        .catch(error => console.error("Error loading rooms:", error));
+}
+
+
+
+
+
