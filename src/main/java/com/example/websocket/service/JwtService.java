@@ -3,7 +3,6 @@ package com.example.websocket.service;
 import com.example.websocket.repo.UserRepository;
 import com.example.websocket.utility.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -13,15 +12,18 @@ import org.springframework.stereotype.Service;
 @Service
 public class JwtService {
 
-    @Autowired
-    private JwtUtil jwtUtil;
+    private final JwtUtil jwtUtil;
 
-    @Autowired
     @Lazy
-    private AuthService authService;
+    private final AuthService authService;
 
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
+
+    public JwtService(JwtUtil jwtUtil, AuthService authService, UserRepository userRepository) {
+        this.jwtUtil = jwtUtil;
+        this.authService = authService;
+        this.userRepository = userRepository;
+    }
 
     public String extractToken(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");

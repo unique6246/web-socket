@@ -3,7 +3,6 @@ package com.example.websocket.service;
 import com.example.websocket.model.*;
 import com.example.websocket.repo.*;
 import jakarta.transaction.Transactional;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
@@ -17,17 +16,22 @@ import java.util.Optional;
 @Service
 public class ChatRoomService {
 
-    @Autowired
-    private ChatRoomUserRepository chatRoomUserRepository;
+    private final ChatRoomUserRepository chatRoomUserRepository;
 
-    @Autowired
-    private ChatRoomRepository chatRoomRepository;
+    private final ChatRoomRepository chatRoomRepository;
 
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
 
-    @Autowired
-    private MessageRepository messageRepository;
+    private final MessageRepository messageRepository;
+
+    public ChatRoomService(ChatRoomRepository chatRoomRepository, UserRepository userRepository,
+                   ChatRoomUserRepository chatRoomUserRepository,MessageRepository messageRepository)
+    {
+        this.chatRoomRepository = chatRoomRepository;
+        this.userRepository = userRepository;
+        this.chatRoomUserRepository = chatRoomUserRepository;
+        this.messageRepository = messageRepository;
+    }
 
     @Cacheable(value = "chatRoomsByName", key = "#username")
     public List<String> getRoomsByUserName(String username) {

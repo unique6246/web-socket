@@ -2,6 +2,7 @@ package com.example.websocket.config;
 
 import com.example.websocket.service.ChatRoomService;
 import org.json.JSONObject;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -43,8 +44,9 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+    protected void handleTextMessage(@Nullable WebSocketSession session,@Nullable TextMessage message) {
         try {
+            assert message != null;
             JSONObject jsonMessage = new JSONObject(message.getPayload());
 
             String sender = jsonMessage.optString("sender", null);
@@ -84,7 +86,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+    public void afterConnectionClosed(WebSocketSession session,@Nullable CloseStatus status) {
         String username = (String) session.getAttributes().get("username");
         String roomName = (String) session.getAttributes().get("roomName");
 

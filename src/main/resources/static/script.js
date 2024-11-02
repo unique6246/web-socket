@@ -22,8 +22,6 @@ function handleError(error, customMessage = "An error occurred") {
     alert(`${customMessage}: ${error.message}`);
 }
 
-let pollingInterval; // To store the polling interval ID
-
 // Login and Registration Handlers
 function handleLogin(e) {
     e.preventDefault();

@@ -22,8 +22,7 @@ public class FileUploadController {
 
     @PostMapping("/upload")
     public ResponseEntity<Map<String, String>> uploadFile(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam("room") String room) {
+            @RequestParam("file") MultipartFile file) {
         try {
             // Store the file and get the URL
             String fileUrl = fileStorageService.storeFile(file);

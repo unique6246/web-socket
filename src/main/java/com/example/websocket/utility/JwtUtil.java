@@ -2,11 +2,13 @@ package com.example.websocket.utility;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.SignatureAlgorithm;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
+import java.security.Key;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +18,11 @@ public class JwtUtil {
 
     @Value("${jwt.secret}")
     private String secret;
+
+    private Key getSigningKey() {
+        // Convert the secret string to bytes and generate an HMAC key
+        return Keys.hmacShaKeyFor(secret.getBytes());
+    }
 
     public String generateToken(UserDetails user) {
         Map<String, Object> claims = new HashMap<>();
@@ -28,7 +35,7 @@ public class JwtUtil {
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
                 .setExpiration(new Date(System.currentTimeMillis() + 60 * 60 * 1000 * 10)) // 10 hours expiration
-                .signWith(SignatureAlgorithm.HS256, secret) // Use secret directly
+                .signWith(getSigningKey(),SignatureAlgorithm.HS256) // Use secret directly
                 .compact();
     }
 
@@ -46,8 +53,9 @@ public class JwtUtil {
 
     public <T> T extractClaim(String token, java.util.function.Function<Claims, T> claimsResolver) {
         try {
-            final Claims claims = Jwts.parser()
-                    .setSigningKey(secret) // Use secret directly
+            final Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey()) // Use secret directly
+                    .build()
                     .parseClaimsJws(token)
                     .getBody();
             return claimsResolver.apply(claims);
