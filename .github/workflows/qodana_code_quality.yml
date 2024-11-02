@@ -16,6 +16,6 @@ jobs:
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2024.1
         with:
-          args: -l jetbrains/qodana-jvm-community:latest
+          args: -l jetbrains/jetbrains/qodana-jvm:latest
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
