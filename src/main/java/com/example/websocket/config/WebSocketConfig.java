@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.lang.Nullable;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -34,8 +35,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(socketConnectionHandler, "/ws")
                 .addInterceptors(new HandshakeInterceptor() {
                     @Override
-                    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
-                                                   WebSocketHandler wsHandler, Map<String, Object> attributes) {
+                    public boolean beforeHandshake(@Nullable ServerHttpRequest request,@Nullable ServerHttpResponse response,
+                                                   @Nullable WebSocketHandler wsHandler,@Nullable Map<String, Object> attributes) {
+                        assert request != null;
                         String query = request.getURI().getQuery();
                         Map<String, String> queryParams = parseQueryParams(query);
 
@@ -44,17 +46,19 @@ public class WebSocketConfig implements WebSocketConfigurer {
                         String roomName = queryParams.get("roomName");
                         if (token != null && jwtService.validateToken(token)) {
                             String username = jwtUtil.extractUsername(token);
+                            assert attributes != null;
                             attributes.put("username", username);
                             attributes.put("roomName", roomName);
                             return true;
                         }
 
+                        assert response != null;
                         response.setStatusCode(HttpStatus.BAD_REQUEST);
                         return false;
                     }
 
                     @Override
-                    public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Exception ex) {
+                    public void afterHandshake(@Nullable ServerHttpRequest request,@Nullable ServerHttpResponse response,@Nullable WebSocketHandler wsHandler, Exception ex) {
                         // No post-handshake action needed
                     }
                 })
