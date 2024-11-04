@@ -1,6 +1,6 @@
 package com.example.websocket.config;
 
-import com.example.websocket.service.JwtService;
+import com.example.websocket.JWT.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

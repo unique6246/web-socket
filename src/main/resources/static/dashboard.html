@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container mt-5">
+  <h2 class="text-center mb-4">Admin Dashboard</h2>
+
+  <!-- User Management Section -->
+  <section>
+    <h4>Manage Users</h4>
+    <div>
+      <!-- List all users -->
+      <button class="btn btn-primary mb-2" onclick="fetchUsers()">View All Users</button>
+      <table class="table" id="usersTable">
+        <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Add new user form -->
+    <h5>Add New User</h5>
+    <form onsubmit="createUser(event)">
+      <div class="form-group">
+        <input type="text" id="newUserName" class="form-control" placeholder="Name" required>
+      </div>
+      <div class="form-group">
+        <input type="password" id="newUserPassword" class="form-control" placeholder="Password" required>
+      </div>
+      <button type="submit" class="btn btn-success">Add User</button>
+    </form>
+  </section>
+
+  <hr>
+
+  <!-- Chat Room Management Section -->
+  <section>
+    <h4>Manage Chat Rooms</h4>
+    <div>
+      <!-- List all chat rooms -->
+      <button class="btn btn-primary mb-2" onclick="fetchChatRooms()">View All Chat Rooms</button>
+      <table class="table" id="chatRoomsTable">
+        <thead>
+        <tr>
+          <th>ID</th>
+          <th>Room Name</th>
+          <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Add new chat room form -->
+    <h5>Add New Chat Room</h5>
+    <form onsubmit="createChatRoom(event)">
+      <div class="form-group">
+        <input type="text" id="newChatRoomName" class="form-control" placeholder="Room Name" required>
+      </div>
+      <button type="submit" class="btn btn-success">Add Chat Room</button>
+    </form>
+  </section>
+
+  <hr>
+
+  <!-- Statistics Section -->
+  <section>
+    <h4>Statistics</h4>
+    <button class="btn btn-info mb-2" onclick="fetchStatistics()">Get Chat Room Statistics</button>
+    <p id="statistics"></p>
+  </section>
+</div>
+
+<script>
+  const baseUrl = "http://localhost:8080/admin"; // Update with your server URL
+
+  // Get JWT token from session storage
+  const token = sessionStorage.getItem("jwtToken");
+
+  // Redirect to login page if token is missing
+  if (!token) {
+    alert("Unauthorized access. Please log in.");
+    window.location.href = "login.html";
+  }
+
+  // Function to make authorized requests
+  async function authorizedFetch(url, options = {}) {
+    options.headers = {
+      ...options.headers,
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    };
+    const response = await fetch(url, options);
+
+    // If unauthorized, redirect to login
+    if (response.status === 401) {
+      alert("Session expired. Please log in again.");
+      window.location.href = "login.html";
+    }
+    return response;
+  }
+
+  // Fetch all users
+  async function fetchUsers() {
+    const response = await authorizedFetch(`${baseUrl}/users`);
+    const users = await response.json();
+    const table = document.getElementById("usersTable").querySelector("tbody");
+    table.innerHTML = ""; // Clear table content
+    users.forEach(user => {
+      const row = `<tr>
+                                <td>${user.id}</td>
+                                <td>${user.name}</td>
+                                <td>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id})">Delete</button>
+                                </td>
+                             </tr>`;
+      table.insertAdjacentHTML("beforeend", row);
+    });
+  }
+
+  // Create a new user
+  async function createUser(event) {
+    event.preventDefault();
+    const name = document.getElementById("newUserName").value;
+    const password = document.getElementById("newUserPassword").value;
+
+    const response = await authorizedFetch(`${baseUrl}/users`, {
+      method: "POST",
+      body: JSON.stringify({ name, password })
+    });
+
+    if (response.ok) {
+      alert("User created successfully");
+      fetchUsers();
+    } else {
+      alert("Error creating user");
+    }
+  }
+
+  // Delete a user
+  async function deleteUser(id) {
+    await authorizedFetch(`${baseUrl}/users/${id}`, { method: "DELETE" });
+    alert("User deleted successfully");
+    fetchUsers();
+  }
+
+  // Fetch all chat rooms
+  async function fetchChatRooms() {
+    const response = await authorizedFetch(`${baseUrl}/chatrooms`);
+    const chatRooms = await response.json();
+    const table = document.getElementById("chatRoomsTable").querySelector("tbody");
+    table.innerHTML = ""; // Clear table content
+    chatRooms.forEach(room => {
+      const row = `<tr>
+                                <td>${room.id}</td>
+                                <td>${room.name}</td>
+                                <td>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteChatRoom(${room.id})">Delete</button>
+                                </td>
+                             </tr>`;
+      table.insertAdjacentHTML("beforeend", row);
+    });
+  }
+
+  // Create a new chat room
+  async function createChatRoom(event) {
+    event.preventDefault();
+    const name = document.getElementById("newChatRoomName").value;
+
+    const response = await authorizedFetch(`${baseUrl}/chatrooms`, {
+      method: "POST",
+      body: JSON.stringify({ name })
+    });
+
+    if (response.ok) {
+      alert("Chat room created successfully");
+      await fetchChatRooms();
+    } else {
+      alert("Error creating chat room");
+    }
+  }
+
+  // Delete a chat room
+  async function deleteChatRoom(id) {
+    await authorizedFetch(`${baseUrl}/chatrooms/${id}`, { method: "DELETE" });
+    alert("Chat room deleted successfully");
+    await fetchChatRooms();
+  }
+
+  // Fetch chat room statistics
+  async function fetchStatistics() {
+    const response = await authorizedFetch(`${baseUrl}/chatrooms/count`);
+    const count = await response.json();
+    document.getElementById("statistics").textContent = `Total Chat Rooms: ${count}`;
+  }
+</script>
+</body>
+</html>

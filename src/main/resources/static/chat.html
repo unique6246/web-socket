@@ -9,8 +9,12 @@
 <body>
 <div class="container">
     <h2>Select or Create a Chat Room</h2>
-    <input type="text" id="roomNameInput" placeholder="Enter room name" required aria-label="Room Name">
-    <button id="createRoomButton">Create Room</button>
+    <!-- Room name input with onkeyup event to search rooms -->
+    <input type="text" id="roomNameInput" placeholder="Enter room name" required aria-label="Room Name" onkeyup="searchRooms()">
+    <!-- Display search results for rooms -->
+    <div id="searchResult" class="search-result"></div>
+    <!-- Button to create or join room if not found in search -->
+    <button id="createOrJoinRoomButton">Create or Join Room</button>
     <div id="roomList" class="room-list scrollable">Loading rooms...</div>
 
     <div id="chatWindow" class="chat-window">

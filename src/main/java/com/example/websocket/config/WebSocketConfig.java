@@ -1,7 +1,7 @@
 package com.example.websocket.config;
 
-import com.example.websocket.service.JwtService;
-import com.example.websocket.utility.JwtUtil;
+import com.example.websocket.JWT.JwtService;
+import com.example.websocket.JWT.JwtUtil;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;

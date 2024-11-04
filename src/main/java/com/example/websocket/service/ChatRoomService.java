@@ -33,6 +33,13 @@ public class ChatRoomService {
         this.messageRepository = messageRepository;
     }
 
+    // ChatRoomService.java
+    public List<ChatRoom> searchRoomsByName(String query) {
+        return chatRoomRepository.findByRoomNameContainingIgnoreCase(query);
+    }
+
+
+
     @Cacheable(value = "chatRoomsByName", key = "#username")
     public List<String> getRoomsByUserName(String username) {
         return chatRoomUserRepository.findRoomNamesByUsername(username);

@@ -1,8 +1,9 @@
 package com.example.websocket.controller;
 
+import com.example.websocket.JWT.JwtService;
 import com.example.websocket.model.*;
 import com.example.websocket.service.*;
-import com.example.websocket.utility.JwtUtil;
+import com.example.websocket.JWT.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 

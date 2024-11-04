@@ -1,7 +1,7 @@
-package com.example.websocket.service;
+package com.example.websocket.JWT;
 
 import com.example.websocket.repo.UserRepository;
-import com.example.websocket.utility.JwtUtil;
+import com.example.websocket.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -14,12 +14,11 @@ public class JwtService {
 
     private final JwtUtil jwtUtil;
 
-    @Lazy
     private final AuthService authService;
 
     private final UserRepository userRepository;
 
-    public JwtService(JwtUtil jwtUtil, AuthService authService, UserRepository userRepository) {
+    public JwtService(JwtUtil jwtUtil,@Lazy AuthService authService, UserRepository userRepository) {
         this.jwtUtil = jwtUtil;
         this.authService = authService;
         this.userRepository = userRepository;

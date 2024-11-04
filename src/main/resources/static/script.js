@@ -66,17 +66,57 @@ function handleRegister(e) {
         .catch(error => handleError(error, "Registration failed"));
 }
 
-function createRoom() {
-    const roomName = document.getElementById("roomNameInput").value;
-    if (!roomName) return alert("Room name is required");
+let lastSearchTerm = ""; // To track the last search term for debouncing
 
-    fetchWithAuth(`http://localhost:8080/api/chat/rooms/create/${roomName}`, { method: 'POST' })
+// Search rooms as user types
+function searchRooms() {
+    const roomNameInput = document.getElementById("roomNameInput").value.trim();
+
+    // Avoid redundant searches
+    if (roomNameInput === lastSearchTerm) return;
+    lastSearchTerm = roomNameInput;
+
+    if (!roomNameInput) {
+        document.getElementById("searchResult").innerHTML = "";
+        return;
+    }
+
+    fetchWithAuth(`http://localhost:8080/api/rooms/search?query=${encodeURIComponent(roomNameInput)}`)
         .then(response => response.json())
+        .then(rooms => displaySearchResults(rooms, roomNameInput))
+        .catch(error => console.error("Error searching rooms:", error));
+}
+
+// Reusable function to create or join a room
+function createOrJoinRoom(roomName) {
+    fetchWithAuth(`http://localhost:8080/api/chat/rooms/create/${roomName}`, { method: 'POST' })
+        .then(response => {
+            if (!response.ok) throw new Error("Room creation or join failed");
+            return response.json();
+        })
         .then(data => {
             alert(`Room '${data.roomName}' created successfully`);
-            return loadInitialRoomMessages();
+            return loadInitialRoomMessages(data.roomName); // Start chat in the newly created or joined room
         })
-        .catch(error => handleError(error, "Room creation failed"));
+        .catch(error => handleError(error, "Failed to create or join room"));
+}
+
+// Display search results and handle room selection or creation
+function displaySearchResults(rooms, roomNameInput) {
+    const searchResultDiv = document.getElementById("searchResult");
+    searchResultDiv.innerHTML = ""; // Clear previous results
+
+    if (rooms.length > 0) {
+        rooms.forEach(room => {
+            const roomButton = document.createElement("button");
+            roomButton.textContent = room.roomName;
+            roomButton.className = "search-room-button";
+            roomButton.onclick = () => createOrJoinRoom(room.roomName); // Reuse createOrJoinRoom function
+            searchResultDiv.appendChild(roomButton);
+        });
+    } else {
+        searchResultDiv.innerHTML = `create room ${roomNameInput}.`;
+    }
 }
 
 function displayRooms(rooms) {
@@ -120,7 +160,6 @@ function initializeChat(roomName) {
     const sendMessageButton = document.getElementById("sendMessageButton");
     sendMessageButton.onclick = sendMessage;
 
-    // Start polling for new messages
 }
 
 function handleIncomingMessage(event) {
@@ -245,18 +284,24 @@ function loadChatHistory(roomName) {
         .catch(error => console.error("Error loading chat history:", error));
 }
 
-// Event Listeners
-document.getElementById("loginForm")?.addEventListener("submit", handleLogin);
-document.getElementById("registerForm")?.addEventListener("submit", handleRegister);
-document.getElementById("createRoomButton")?.addEventListener("click", createRoom);
-document.getElementById("fileInput")?.addEventListener("change", handleFileUpload);
-document.getElementById("leaveRoomButton")?.addEventListener("click", endChat);
-document.getElementById("attachFileButton")?.addEventListener("click", () => document.getElementById("fileInput").click());
+// Event Listeners and Initialization
 document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("loginForm")?.addEventListener("submit", handleLogin);
+    document.getElementById("registerForm")?.addEventListener("submit", handleRegister);
+    document.getElementById("fileInput")?.addEventListener("change", handleFileUpload);
+    document.getElementById("leaveRoomButton")?.addEventListener("click", endChat);
+    document.getElementById("")
+    document.getElementById("attachFileButton")?.addEventListener("click", () => document.getElementById("fileInput").click());
+    document.getElementById("createOrJoinRoomButton")?.addEventListener("click", () => {
+        const roomNameInput = document.getElementById("roomNameInput").value.trim();
+        if (!roomNameInput) return alert("Room name is required");
+        createOrJoinRoom(roomNameInput);
+    });
     return loadInitialRoomMessages();
 });
+
 function loadInitialRoomMessages() {
-    return fetchWithAuth("http://localhost:8080/api/rooms") // Adjust this URL as necessary to get room messages
+    return fetchWithAuth("http://localhost:8080/api/user/rooms") // Adjust this URL as necessary to get room messages
         .then(response => response.json())
         .then(rooms => {displayRooms(rooms)})
         .catch(error => console.error("Error loading rooms:", error));

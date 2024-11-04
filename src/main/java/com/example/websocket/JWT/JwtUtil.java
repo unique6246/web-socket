@@ -1,4 +1,4 @@
-package com.example.websocket.utility;
+package com.example.websocket.JWT;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;

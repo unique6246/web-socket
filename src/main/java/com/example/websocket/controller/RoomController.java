@@ -1,11 +1,13 @@
 package com.example.websocket.controller;
 
+import com.example.websocket.model.ChatRoom;
 import com.example.websocket.service.ChatRoomService;
-import com.example.websocket.service.JwtService;
-import com.example.websocket.utility.JwtUtil;
+import com.example.websocket.JWT.JwtService;
+import com.example.websocket.JWT.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -27,7 +29,7 @@ public class RoomController {
         this.jwtUtil = jwtUtil;
     }
 
-    @GetMapping("/api/rooms")
+    @GetMapping("/api/user/rooms")
     public ResponseEntity<List<Map<String, String>>> rooms(HttpServletRequest request) {
         String token = jwtService.extractToken(request);
         String username = jwtUtil.extractUsername(token);
@@ -46,5 +48,11 @@ public class RoomController {
 
         return ResponseEntity.ok(roomObjects);
     }
+
+    @GetMapping("/api/rooms/search")
+    public ResponseEntity<List<ChatRoom>> searchRooms(@RequestParam String query, HttpServletRequest request) {
+        return ResponseEntity.ok(chatRoomService.searchRoomsByName(query));
+    }
+
 
 }

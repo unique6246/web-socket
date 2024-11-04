@@ -111,4 +111,25 @@ button:hover {
     font-weight: bold; /* To make it stand out */
 }
 
+/* style.css */
+.search-result {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid #acacac;
+    background-color: rgba(239, 239, 239, 0.33);
+}
 
+.search-room-button {
+    display: block;
+    margin: 4px 0;
+    padding: 8px;
+    background-color: #98caff;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+}
+
+.search-room-button:hover {
+    background-color: #9cb1c5;
+}

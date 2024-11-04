@@ -9,5 +9,6 @@ import java.util.*;
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
     Optional<ChatRoom> findByRoomName(String roomName);
 
+    List<ChatRoom> findByRoomNameContainingIgnoreCase(String query);
 }
 

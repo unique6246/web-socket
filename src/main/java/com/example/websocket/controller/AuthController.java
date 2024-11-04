@@ -3,7 +3,7 @@ package com.example.websocket.controller;
 
 import com.example.websocket.model.User;
 import com.example.websocket.service.AuthService;
-import com.example.websocket.utility.JwtUtil;
+import com.example.websocket.JWT.JwtUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;

@@ -53,7 +53,7 @@ public class AuthService implements UserDetailsService {
             return ResponseEntity.badRequest().body("Username is already taken.");
         }
         registrationRequest.setPassword(passwordEncoder.encode(registrationRequest.getPassword()));
-        Role userRole = roleRepository.findByName("USER");
+        Role userRole = roleRepository.findByName("USER").orElse(null);
         registrationRequest.setRoles(Collections.singleton(userRole));
         userRepository.save(registrationRequest);
         return ResponseEntity.ok().body("User registered successfully.");
