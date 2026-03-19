@@ -7,7 +7,6 @@ import com.example.websocket.repo.UserRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -25,19 +24,8 @@ public class WebSocketApplication {
     @Bean
     public CommandLineRunner seedData(RoleRepository roleRepository,
                                       UserRepository userRepository,
-                                      PasswordEncoder passwordEncoder,
-                                      CacheManager cacheManager) {
+                                      PasswordEncoder passwordEncoder) {
         return args -> {
-            // Flush stale userDetails cache on every startup
-            try {
-                var userDetailsCache = cacheManager.getCache("userDetails");
-                if (userDetailsCache != null) {
-                    userDetailsCache.clear();
-                }
-            } catch (Exception e) {
-                System.out.println("==> Warning: could not clear userDetails cache: " + e.getMessage());
-            }
-
             // Seed roles
             List<String> roleNames = Arrays.asList("ADMIN", "USER", "MODERATOR");
             for (String roleName : roleNames) {
@@ -59,12 +47,12 @@ public class WebSocketApplication {
                 admin.setEmail("admin@chatapp.com");
             }
             // Always ensure correct password and role on every startup
-            admin.setPassword(passwordEncoder.encode("admin123"));
+            admin.setPassword(passwordEncoder.encode("Admin@1234"));
             if (admin.getRoles() == null) admin.setRoles(new HashSet<>());
             boolean hasAdminRole = admin.getRoles().stream().anyMatch(r -> "ADMIN".equals(r.getName()));
             if (!hasAdminRole) admin.getRoles().add(adminRole);
             userRepository.save(admin);
-            System.out.println("==> Admin user ready: username=admin password=admin123 roles=" + admin.getRoles().stream().map(Role::getName).collect(java.util.stream.Collectors.joining(",")));
+            System.out.println("==> Admin user ready: username=admin roles=" + admin.getRoles().stream().map(Role::getName).collect(java.util.stream.Collectors.joining(",")));
         };
     }
 }

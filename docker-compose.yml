@@ -1,0 +1,66 @@
+# ═══════════════════════════════════════════════════════════════
+#  ChatApp – Docker Compose
+#  Services:  app  |  mysql
+#  Cloudinary is external (cloud) — no container needed.
+#
+#  Usage:
+#    docker compose up --build        # first time
+#    docker compose up -d             # detached
+#    docker compose down              # stop & remove containers
+#    docker compose down -v           # also remove volumes (wipes DB)
+# ═══════════════════════════════════════════════════════════════
+
+services:
+
+  # ── MySQL ────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: chatapp-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE:      ${DB_NAME}
+      MYSQL_USER:          ${DB_USERNAME}
+      MYSQL_PASSWORD:      ${DB_PASSWORD}
+    ports:
+      - "3306:3306"           # expose for local tools (DBeaver, MySQL Workbench)
+    volumes:
+      - mysql_data:/var/lib/mysql   # persist database across restarts
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - chatapp-net
+
+  # ── Spring Boot App ───────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatapp-app
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    env_file:
+      - .env                  # load all variables from .env
+    environment:
+      # Override localhost references with Docker service names
+      DB_HOST:    mysql
+    depends_on:
+      mysql:
+        condition: service_healthy   # wait until MySQL is ready
+    networks:
+      - chatapp-net
+
+# ── Volumes ───────────────────────────────────────────────────
+volumes:
+  mysql_data:
+    driver: local
+
+# ── Network ───────────────────────────────────────────────────
+networks:
+  chatapp-net:
+    driver: bridge

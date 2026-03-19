@@ -1,0 +1,29 @@
+# Build output — the Dockerfile re-builds inside the container
+target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.classpath
+*.project
+*.settings/
+
+# Git
+.git/
+.gitignore
+
+# Environment secrets — never copy into image
+.env
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Local uploads folder (files go to Cloudinary, not local disk)
+uploads/
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
