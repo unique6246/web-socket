@@ -5,13 +5,13 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.SignatureAlgorithm;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import java.security.Key;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 public class JwtUtil {
@@ -26,6 +26,11 @@ public class JwtUtil {
 
     public String generateToken(UserDetails user) {
         Map<String, Object> claims = new HashMap<>();
+        List<String> roles = user.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toList());
+        claims.put("roles", roles);
+        claims.put("jti", UUID.randomUUID().toString()); // unique token ID for blacklisting
         return createToken(claims, user.getUsername());
     }
 
@@ -34,8 +39,8 @@ public class JwtUtil {
                 .setClaims(claims)
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 60 * 60 * 1000 * 10)) // 10 hours expiration
-                .signWith(getSigningKey(),SignatureAlgorithm.HS256) // Use secret directly
+                .setExpiration(new Date(System.currentTimeMillis() + 60L * 60 * 1000 * 2)) // 2 hours
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
@@ -49,6 +54,11 @@ public class JwtUtil {
 
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<String> extractRoles(String token) {
+        return (List<String>) extractClaim(token, claims -> claims.get("roles"));
     }
 
     public <T> T extractClaim(String token, java.util.function.Function<Claims, T> claimsResolver) {

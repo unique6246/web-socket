@@ -3,16 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Application</title>
-    <link rel="stylesheet" href="style.css">
+    <title>ChatApp – Real-time Chat</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .landing { text-align: center; padding: 40px 20px; }
+        .landing h1 { font-size: 2em; margin-bottom: 10px; }
+        .landing p  { color: #555; margin-bottom: 30px; }
+        .landing a  { display: inline-block; margin: 8px; padding: 12px 28px;
+                      background: #007BFF; color: #fff; border-radius: 6px;
+                      text-decoration: none; font-size: 1.05em; }
+        .landing a:hover { background: #0056b3; }
+        .landing a.secondary { background: #6c757d; }
+        .landing a.secondary:hover { background: #495057; }
+    </style>
 </head>
 <body>
-<div class="container">
-    <h1>Welcome to the Chat Application</h1>
-    <nav>
-        <a href="login.html">Login</a>
-        <a href="register.html">Register</a>
-    </nav>
+<div class="container landing">
+    <h1>💬 ChatApp</h1>
+    <p>Real-time chat with rooms, file sharing, and role management.</p>
+    <a href="/api/v1/login">Login</a>
+    <a href="/api/v1/register" class="secondary">Register</a>
 </div>
+<script>
+    (async function checkExistingSession() {
+        try {
+            const res = await fetch("/api/auth/me", { credentials: "include" });
+            if (res.ok) {
+                const data = await res.json();
+                sessionStorage.setItem("roles",    JSON.stringify(data.roles || []));
+                sessionStorage.setItem("username", data.username);
+                window.location.href = (data.roles || []).includes("ROLE_ADMIN") ? "/api/v1/dashboard" : "/api/v1/chat";
+            }
+        } catch(e) {}
+    })();
+</script>
 </body>
 </html>

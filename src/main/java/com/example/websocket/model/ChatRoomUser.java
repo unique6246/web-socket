@@ -10,7 +10,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "chat_room_user", uniqueConstraints = @UniqueConstraint(columnNames = {"chatroom_id", "user_id"}))
-public class ChatRoomUser   {
+public class ChatRoomUser {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -24,4 +24,8 @@ public class ChatRoomUser   {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    /** true only for the user who created the group */
+    @Column(nullable = false)
+    private boolean groupAdmin = false;
 }
