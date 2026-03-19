@@ -1,12 +1,10 @@
 package com.example.websocket.fileStorage;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -15,27 +13,40 @@ public class FileUploadController {
 
     private final FileStorageService fileStorageService;
 
-    @Autowired
     public FileUploadController(FileStorageService fileStorageService) {
         this.fileStorageService = fileStorageService;
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<Map<String, String>> uploadFile(
-            @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<Map<String, String>> uploadFile(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No file selected."));
+        }
         try {
-            // Store the file and get the URL
-            String fileUrl = fileStorageService.storeFile(file);
-            String fileName = file.getOriginalFilename();
-            Map<String, String> response = new HashMap<>();
-            response.put("fileUrl", fileUrl);
-            response.put("fileName", fileName);
-            response.put("type",file.getContentType());
-            return ResponseEntity.ok(response);
+            FileStorageService.UploadResult result = fileStorageService.storeFile(file);
+            return ResponseEntity.ok(Map.of(
+                    "fileUrl",      result.fileUrl(),        // Cloudinary CDN HTTPS URL
+                    "fileName",     file.getOriginalFilename() != null ? file.getOriginalFilename() : "file",
+                    "publicId",     result.publicId(),       // needed if you want to delete later
+                    "resourceType", result.resourceType(),
+                    "type",         file.getContentType() != null ? file.getContentType() : ""
+            ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "File upload failed"));
+                    .body(Map.of("error", "File upload failed: " + e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/delete")
+    public ResponseEntity<Map<String, String>> deleteFile(
+            @RequestParam("publicId") String publicId,
+            @RequestParam(value = "resourceType", defaultValue = "raw") String resourceType) {
+        try {
+            fileStorageService.deleteFile(publicId, resourceType);
+            return ResponseEntity.ok(Map.of("message", "File deleted successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "File deletion failed: " + e.getMessage()));
         }
     }
 }
-

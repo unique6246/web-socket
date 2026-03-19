@@ -3,19 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-    <link rel="stylesheet" href="style.css">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <title>Login – ChatApp</title>
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div class="container">
-    <h2>Login</h2>
+    <h2>Welcome Back</h2>
+    <div id="loginError" class="error-msg" style="display:none;"></div>
     <form id="loginForm">
-        <input type="text" id="username" placeholder="Username" required>
-        <input type="password" id="password" placeholder="Password" required>
+        <input type="text" id="username" placeholder="Username" required autocomplete="username" maxlength="50">
+        <input type="password" id="password" placeholder="Password" required autocomplete="current-password" maxlength="128">
         <button type="submit">Login</button>
     </form>
-    <p>Don't have an account? <a href="register.html">Register here</a></p>
+    <p>Don't have an account? <a href="/api/v1/register">Register here</a></p>
 </div>
-<script src="script.js"></script>
+<script src="/script.js"></script>
+<script>
+    // Check if already logged in by calling the server (uses HttpOnly cookie).
+    // We never check sessionStorage for a token — it no longer exists there.
+    (async function checkExistingSession() {
+        try {
+            const res = await fetch("/api/auth/me", { credentials: "include" });
+            if (res.ok) {
+                const data = await res.json();
+                sessionStorage.setItem("roles",    JSON.stringify(data.roles || []));
+                sessionStorage.setItem("username", data.username);
+                window.location.href = (data.roles || []).includes("ROLE_ADMIN") ? "/api/v1/dashboard" : "/api/v1/chat";
+            }
+            // If not ok — cookie absent or expired — stay on login page (no action needed)
+        } catch(e) { /* network error — stay on login page */ }
+    })();
+</script>
 </body>
 </html>

@@ -3,19 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register</title>
-    <link rel="stylesheet" href="style.css">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <title>Register – ChatApp</title>
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div class="container">
-    <h2>Register</h2>
+    <h2>Create Account</h2>
+    <div id="registerError" class="error-msg" style="display:none;"></div>
+    <div id="registerSuccess" class="success-msg" style="display:none;"></div>
     <form id="registerForm">
-        <input type="text" id="newUsername" placeholder="Username" required>
-        <input type="password" id="newPassword" placeholder="Password" required>
+        <input type="text"     id="newUsername"     placeholder="Username (3–50 chars)"   required autocomplete="username"     maxlength="50" minlength="3">
+        <input type="email"    id="newEmail"         placeholder="Email address"            required autocomplete="email"         maxlength="100">
+        <input type="password" id="newPassword"      placeholder="Password (min 8 chars)"  required autocomplete="new-password"  maxlength="128">
+        <input type="password" id="confirmPassword"  placeholder="Confirm Password"         required autocomplete="new-password"  maxlength="128">
+        <small style="color:#94a3b8;font-size:.8em;">
+            Password must be at least 8 characters and include uppercase, lowercase, digit, and special character.
+        </small>
         <button type="submit">Register</button>
     </form>
-    <p>Already have an account? <a href="login.html">Login here</a></p>
+    <p>Already have an account? <a href="/api/v1/login">Login here</a></p>
 </div>
-<script src="script.js"></script>
+<script src="/script.js"></script>
 </body>
 </html>

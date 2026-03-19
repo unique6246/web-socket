@@ -1,32 +1,189 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Room</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none';">
+  <title>ChatApp</title>
+  <link rel="stylesheet" href="/style.css"/>
 </head>
-<body>
-<div class="container">
-    <h2>Select or Create a Chat Room</h2>
-    <!-- Room name input with onkeyup event to search rooms -->
-    <input type="text" id="roomNameInput" placeholder="Enter room name" required aria-label="Room Name" onkeyup="searchRooms()">
-    <!-- Display search results for rooms -->
-    <div id="searchResult" class="search-result"></div>
-    <!-- Button to create or join room if not found in search -->
-    <button id="createOrJoinRoomButton">Create or Join Room</button>
-    <div id="roomList" class="room-list scrollable">Loading rooms...</div>
+<body class="chat-page">
 
-    <div id="chatWindow" class="chat-window">
-        <h2 id="chatRoomTitle">Chat Room</h2>
-        <div id="messages" class="messages-container"></div>
-        <input type="text" id="messageInput" placeholder="Type a message..." required aria-label="Message Input">
-        <button id="sendMessageButton">Send</button>
-        <button id="attachFileButton" aria-label="Attach File">Attach File</button>
-        <button id="leaveRoomButton" style="display: none;" aria-label="Leave Room">Leave Room</button>
-        <input type="file" id="fileInput" style="display: none;">
+<!-- ══════════════  TOP NAV  ══════════════ -->
+<nav class="topnav">
+  <span class="topnav-brand">💬 ChatApp</span>
+  <div class="topnav-right">
+    <span id="loggedInUser" class="nav-username"></span>
+    <span id="roleBadge" class="role-badge" style="display:none;"></span>
+    <a id="adminPanelLink" href="/api/v1/dashboard" class="nav-link" style="display:none;">🛡 Admin</a>
+    <button id="logoutButton" class="nav-btn danger">Logout</button>
+  </div>
+</nav>
+
+<!-- ══════════════  MAIN  ══════════════ -->
+<div class="chat-layout">
+
+  <!-- ─────────── SIDEBAR ─────────── -->
+  <aside class="sidebar">
+
+    <!-- Sidebar tabs -->
+    <div class="sidebar-tabs">
+      <button class="stab active" data-tab="people">👥 People</button>
+      <button class="stab" data-tab="dms">💬 DMs</button>
+      <button class="stab" data-tab="groups">
+        🏠 Groups
+        <button id="newGroupBtn" class="stab-action" title="New group">＋</button>
+      </button>
     </div>
+
+    <!-- People tab -->
+    <div id="tab-people" class="sidebar-tab-content active">
+      <div class="tab-search">
+        <input id="peopleSearch" type="text" placeholder="Search users…" autocomplete="off"/>
+      </div>
+      <div id="peopleList" class="room-list">
+        <span class="muted-hint">Loading…</span>
+      </div>
+    </div>
+
+    <!-- DMs tab -->
+    <div id="tab-dms" class="sidebar-tab-content">
+      <div id="dmList" class="room-list">
+        <span class="muted-hint">No DMs yet.<br>Click a user to start.</span>
+      </div>
+    </div>
+
+    <!-- Groups tab -->
+    <div id="tab-groups" class="sidebar-tab-content">
+      <div id="groupList" class="room-list">
+        <span class="muted-hint">No groups yet.</span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ─────────── CHAT AREA ─────────── -->
+  <main class="chat-main">
+
+    <div id="emptyState" class="empty-state">
+      <div class="empty-icon">💬</div>
+      <h2>Select a conversation</h2>
+      <p>Pick a user from <strong>People</strong> to start a DM,<br>or open a group from <strong>Groups</strong>.</p>
+    </div>
+
+    <div id="chatWindow" class="chat-window" style="display:none;">
+
+      <div class="chat-header">
+        <div class="chat-header-info">
+          <span id="chatRoomIcon" class="chat-room-icon">💬</span>
+          <div>
+            <span id="chatRoomTitle" class="chat-room-name"></span>
+            <span id="chatRoomSub" class="chat-room-sub"></span>
+          </div>
+          <span id="onlineDot" class="online-dot"></span>
+        </div>
+        <div class="chat-header-actions">
+          <button id="membersBtn" class="icon-btn" title="View members" style="display:none;">👥</button>
+          <button id="addMemberBtn" class="icon-btn" title="Add member to group" style="display:none;">👤＋</button>
+          <button id="modToolsBtn" class="icon-btn" title="Moderator tools" style="display:none;">🛠</button>
+          <button id="leaveRoomButton" class="btn-ghost btn-sm danger-text" style="display:none;">Leave</button>
+        </div>
+      </div>
+
+      <div id="roomError" class="error-banner" style="display:none;"></div>
+      <div id="modTools" class="mod-tools-bar" style="display:none;">🛡 Moderator – click any message for options.</div>
+
+      <!-- Members panel (slide in from right, inside chat window) -->
+      <div id="membersPanel" class="members-panel" style="display:none;">
+        <div class="members-panel-header">
+          <span>Members</span>
+          <button id="closeMembersPanel" class="icon-btn">✕</button>
+        </div>
+        <div id="membersPanelList" class="members-panel-list"></div>
+      </div>
+
+      <div class="chat-body">
+      <div class="chat-body">
+      <div id="messages" class="messages-area"></div>
+
+      <div class="input-bar">
+        <button id="attachFileButton" class="icon-btn attach-btn" title="Attach file">📎</button>
+        <input id="messageInput" type="text" placeholder="Type a message…" autocomplete="off"/>
+        <button id="sendMessageButton" class="send-btn" title="Send">➤</button>
+      </div>
+      <input type="file" id="fileInput" style="display:none;"/>
+      </div><!-- /.chat-body -->
+    </div>
+  </main>
 </div>
-<script src="script.js"></script>
+
+<!-- ══════════════  NEW GROUP MODAL  ══════════════ -->
+<div id="groupModal" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span>Create New Group</span>
+      <button id="closeGroupModal" class="icon-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="modal-label">Group Name</label>
+      <input id="groupNameInput" type="text" class="modal-input" placeholder="e.g. Project Team"/>
+
+      <label class="modal-label" style="margin-top:14px;">Add Members <span class="muted-hint" style="display:inline;">(select from list)</span></label>
+      <div id="groupMemberSearch" class="modal-search">
+        <input id="memberSearchInput" type="text" class="modal-input" placeholder="Search users…"/>
+      </div>
+
+      <div id="selectedMemberChips" class="chip-row"></div>
+
+      <div id="memberPickList" class="member-pick-list"></div>
+    </div>
+    <div class="modal-footer">
+      <span id="groupModalError" class="modal-error" style="display:none;"></span>
+      <button id="createGroupBtn" class="btn-primary btn-sm">Create Group</button>
+      <button id="cancelGroupBtn" class="btn-ghost btn-sm">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════  ADD MEMBER MODAL  ══════════════ -->
+<div id="addMemberModal" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span>Add Member to <span id="addMemberGroupName" class="modal-group-label"></span></span>
+      <button id="closeAddMemberModal" class="icon-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="modal-label">Search &amp; Select User</label>
+      <div class="modal-search">
+        <input id="addMemberSearchInput" type="text" class="modal-input" placeholder="Search users…" autocomplete="off"/>
+      </div>
+      <div id="addMemberPickList" class="member-pick-list"></div>
+    </div>
+    <div class="modal-footer">
+      <span id="addMemberError" class="modal-error" style="display:none;"></span>
+      <button id="confirmAddMemberBtn" class="btn-primary btn-sm" disabled>Add Selected</button>
+      <button id="cancelAddMemberBtn" class="btn-ghost btn-sm">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="/script.js"></script>
+<script>
+  // Guard: verify session with server via HttpOnly cookie.
+  // No token in sessionStorage — the cookie handles everything.
+  (async function guardChat() {
+    const ok = await requireAuth();
+    if (!ok) return;
+    if (document.readyState !== "loading") {
+      setupRoleUI();
+      initTabs();
+      loadPeopleList();
+      loadMyRooms();
+    }
+  })();
+</script>
 </body>
 </html>
+

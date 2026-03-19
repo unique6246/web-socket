@@ -16,10 +16,14 @@ import java.util.concurrent.CopyOnWriteArraySet;
 
 @Component
 public class SocketConnectionHandler extends TextWebSocketHandler {
-    // Map to store sessions per user (username)
-    private static final Map<String, WebSocketSession> userSessions = new ConcurrentHashMap<>();
 
-    // Map to store sessions per room
+    /**
+     * Keyed by "username::roomName"  →  session
+     * Allows one active session per user per room (DM or Group).
+     */
+    private static final Map<String, WebSocketSession> userRoomSessions = new ConcurrentHashMap<>();
+
+    /** roomName  →  set of open WebSocket sessions (all users in that room) */
     private static final Map<String, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
 
     private final ChatRoomService chatRoomService;
@@ -28,98 +32,107 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         this.chatRoomService = chatRoomService;
     }
 
+    // ── Lifecycle ──────────────────────────────────────────────────────────
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         String username = (String) session.getAttributes().get("username");
         String roomName = (String) session.getAttributes().get("roomName");
+        if (username == null || roomName == null) return;
 
-        if (username != null && roomName != null) {
-            // Disconnect the user from any existing room and remove their session
-            disconnectAndRemovePreviousSession(username);
+        String key = sessionKey(username, roomName);
 
-            // Track user session in the new room
-            userSessions.put(username, session);
-            roomSessions.computeIfAbsent(roomName, k -> new CopyOnWriteArraySet<>()).add(session);
+        // If there is already a session for this user+room, close it gracefully
+        WebSocketSession existing = userRoomSessions.put(key, session);
+        if (existing != null && existing.isOpen()) {
+            removeFromRoom(existing, roomName);
+            try { existing.close(); } catch (Exception ignored) {}
         }
+
+        // Register in room map
+        roomSessions.computeIfAbsent(roomName, k -> new CopyOnWriteArraySet<>()).add(session);
     }
 
     @Override
-    protected void handleTextMessage(@Nullable WebSocketSession session,@Nullable TextMessage message) {
+    protected void handleTextMessage(@Nullable WebSocketSession session,
+                                     @Nullable TextMessage message) {
         try {
             assert message != null;
-            JSONObject jsonMessage = new JSONObject(message.getPayload());
+            assert session != null;
+            JSONObject json = new JSONObject(message.getPayload());
 
-            String sender = jsonMessage.optString("sender", null);
-            String roomName = jsonMessage.optString("room", null);
-            String msgContent = jsonMessage.optString("message", null);
-            String fileUrl = jsonMessage.optString("fileUrl", null);
-            String fileType = jsonMessage.optString("fileType", null);
-            String fileName = jsonMessage.optString("fileName", null);
+            // SECURITY: Use server-side authenticated username from handshake — never trust client-supplied sender
+            String sender    = (String) session.getAttributes().get("username");
+            String roomName  = json.optString("room",     null);
+            String content   = json.optString("message",  null);
+            String fileUrl   = json.optString("fileUrl",  null);
+            String fileType  = json.optString("fileType", null);
+            String fileName  = json.optString("fileName", null);
 
-            chatRoomService.saveMessage (roomName, sender, msgContent, fileUrl, fileType, fileName);
+            if (sender == null || sender.isBlank()) return;
+            if (roomName == null || roomName.isBlank()) return;
 
+            // Verify sender is actually in this room (access control)
+            String sessionRoom = (String) session.getAttributes().get("roomName");
+            if (!roomName.equals(sessionRoom)) {
+                System.err.println("Security: User " + sender + " tried to post to " + roomName + " but is connected to " + sessionRoom);
+                return;
+            }
 
+            // Persist
+            chatRoomService.saveMessage(roomName, sender, content, fileUrl, fileType, fileName);
 
-            JSONObject sendMessage = new JSONObject();
-            sendMessage.put("sender", sender);
-            sendMessage.put("message", msgContent);
-            sendMessage.put("roomName", roomName);
-            sendMessage.put("fileUrl", fileUrl);
-            sendMessage.put("fileType", fileType);
-            sendMessage.put("fileName", fileName);
+            // Broadcast to every session currently in this room
+            JSONObject broadcast = new JSONObject();
+            broadcast.put("sender",   sender);
+            broadcast.put("message",  content);
+            broadcast.put("roomName", roomName);
+            broadcast.put("fileUrl",  fileUrl);
+            broadcast.put("fileType", fileType);
+            broadcast.put("fileName", fileName);
 
-            Set<WebSocketSession> roomUsers = roomSessions.get(roomName);
-            if (roomUsers != null) {
-                for (WebSocketSession userSession : roomUsers) {
-                    if (userSession.isOpen()) {
-                        try {
-                            userSession.sendMessage(new TextMessage(sendMessage.toString()));
-                        } catch (Exception e) {
-                            System.err.println("Failed to send message to user " + userSession.getId() + ": " + e.getMessage());
+            TextMessage outgoing = new TextMessage(broadcast.toString());
+            Set<WebSocketSession> targets = roomSessions.get(roomName);
+            if (targets != null) {
+                for (WebSocketSession s : targets) {
+                    if (s.isOpen()) {
+                        try { s.sendMessage(outgoing); }
+                        catch (Exception e) {
+                            System.err.println("Send failed for session " + s.getId() + ": " + e.getMessage());
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error handling message: " + e.getMessage());
+            System.err.println("handleTextMessage error: " + e.getMessage());
         }
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session,@Nullable CloseStatus status) {
+    public void afterConnectionClosed(WebSocketSession session,
+                                      @Nullable CloseStatus status) {
         String username = (String) session.getAttributes().get("username");
         String roomName = (String) session.getAttributes().get("roomName");
+        if (username == null || roomName == null) return;
 
-        if (username != null) {
-            // Remove user session when they disconnect
-            removeUserSession(username, roomName);
-        }
+        String key = sessionKey(username, roomName);
+        // Only remove if this is still the registered session for that key
+        userRoomSessions.remove(key, session);
+        removeFromRoom(session, roomName);
     }
 
-    // Helper method to disconnect and remove previous session for a user
-    private void disconnectAndRemovePreviousSession(String username) {
-        WebSocketSession existingSession = userSessions.get(username);
-        if (existingSession != null) {
-            String previousRoomName = (String) existingSession.getAttributes().get("roomName");
-            removeUserSession(username, previousRoomName);
+    // ── Helpers ────────────────────────────────────────────────────────────
 
-            // Close previous session
-            try {
-                existingSession.close();
-            } catch (Exception ignored) {
-            }
-        }
+    /** Composite key: one slot per (user, room) pair */
+    private static String sessionKey(String username, String roomName) {
+        return username + "::" + roomName;
     }
 
-    // Helper method to remove a user's session from maps
-    private void removeUserSession(String username, String roomName) {
-        WebSocketSession session = userSessions.remove(username);
-        if (session != null && roomName != null && roomSessions.containsKey(roomName)) {
-            Set<WebSocketSession> sessions = roomSessions.get(roomName);
+    private void removeFromRoom(WebSocketSession session, String roomName) {
+        Set<WebSocketSession> sessions = roomSessions.get(roomName);
+        if (sessions != null) {
             sessions.remove(session);
-            if (sessions.isEmpty()) {
-                roomSessions.remove(roomName); // Cleanup room if empty
-            }
+            if (sessions.isEmpty()) roomSessions.remove(roomName);
         }
     }
 }

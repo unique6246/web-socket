@@ -21,6 +21,10 @@ public class ChatRoom implements Serializable {
     @Column(unique = true, nullable = false)
     private String roomName;
 
+    /** "DM" for direct messages, "GROUP" for group chats */
+    @Column(nullable = false)
+    private String type = "GROUP";
+
     @OneToMany(mappedBy = "chatRoom", cascade = CascadeType.PERSIST, orphanRemoval = true)
     @JsonManagedReference
     private Set<ChatRoomUser> chatRoomUsers = new HashSet<>();

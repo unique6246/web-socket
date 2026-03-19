@@ -1,7 +1,6 @@
 package com.example.websocket.config;
 
-import com.example.websocket.JWT.JwtService;
-import com.example.websocket.JWT.JwtUtil;
+import com.example.websocket.JWT.WsTicketService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
@@ -16,68 +15,77 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * WebSocket connections are authenticated via a one-time ticket (not the JWT).
+ * Before opening a WS connection, the frontend calls POST /api/auth/ws-ticket
+ * which returns a random 30-second ticket. That ticket is passed in the WS URL.
+ * This way the real JWT never appears in the WebSocket URL or browser history.
+ */
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    private final JwtService jwtService;
-    private final JwtUtil jwtUtil;
+    private final WsTicketService wsTicketService;
     private final SocketConnectionHandler socketConnectionHandler;
-    public WebSocketConfig(JwtService jwtService, JwtUtil jwtUtil, SocketConnectionHandler socketConnectionHandler) {
-        this.jwtService = jwtService;
-        this.jwtUtil = jwtUtil;
+
+    public WebSocketConfig(WsTicketService wsTicketService,
+                           SocketConnectionHandler socketConnectionHandler) {
+        this.wsTicketService = wsTicketService;
         this.socketConnectionHandler = socketConnectionHandler;
     }
-
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(socketConnectionHandler, "/ws")
                 .addInterceptors(new HandshakeInterceptor() {
                     @Override
-                    public boolean beforeHandshake(@Nullable ServerHttpRequest request,@Nullable ServerHttpResponse response,
-                                                   @Nullable WebSocketHandler wsHandler,@Nullable Map<String, Object> attributes) {
+                    public boolean beforeHandshake(@Nullable ServerHttpRequest request,
+                                                   @Nullable ServerHttpResponse response,
+                                                   @Nullable WebSocketHandler wsHandler,
+                                                   @Nullable Map<String, Object> attributes) {
                         assert request != null;
-                        String query = request.getURI().getQuery();
-                        Map<String, String> queryParams = parseQueryParams(query);
+                        assert response != null;
+                        assert attributes != null;
 
-                        // Get the token and roomName from queryParams
-                        String token = queryParams.get("token");
-                        String roomName = queryParams.get("roomName");
-                        if (token != null && jwtService.validateToken(token)) {
-                            String username = jwtUtil.extractUsername(token);
-                            assert attributes != null;
-                            attributes.put("username", username);
-                            attributes.put("roomName", roomName);
-                            return true;
+                        Map<String, String> params = parseQueryParams(request.getURI().getQuery());
+                        String ticket   = params.get("ticket");
+                        String roomName = params.get("roomName");
+
+                        // Validate one-time ticket — consumes it immediately
+                        String username = wsTicketService.consumeTicket(ticket);
+                        if (username == null) {
+                            response.setStatusCode(HttpStatus.UNAUTHORIZED);
+                            return false;
                         }
 
-                        assert response != null;
-                        response.setStatusCode(HttpStatus.BAD_REQUEST);
-                        return false;
+                        attributes.put("username", username);
+                        attributes.put("roomName", roomName);
+                        return true;
                     }
 
                     @Override
-                    public void afterHandshake(@Nullable ServerHttpRequest request,@Nullable ServerHttpResponse response,@Nullable WebSocketHandler wsHandler, Exception ex) {
-                        // No post-handshake action needed
-                    }
+                    public void afterHandshake(@Nullable ServerHttpRequest request,
+                                               @Nullable ServerHttpResponse response,
+                                               @Nullable WebSocketHandler wsHandler,
+                                               Exception ex) {}
                 })
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("http://localhost:*", "https://localhost:*");
     }
 
-    // Helper method to parse query parameters
     private Map<String, String> parseQueryParams(String query) {
         Map<String, String> params = new HashMap<>();
         if (query != null) {
-            String[] pairs = query.split("&");
-            for (String pair : pairs) {
+            for (String pair : query.split("&")) {
                 int idx = pair.indexOf("=");
                 if (idx > 0) {
-                    params.put(pair.substring(0, idx), pair.substring(idx + 1));
+                    String key   = pair.substring(0, idx);
+                    String value = pair.substring(idx + 1);
+                    try { value = java.net.URLDecoder.decode(value, java.nio.charset.StandardCharsets.UTF_8); }
+                    catch (Exception ignored) {}
+                    params.put(key, value);
                 }
             }
         }
         return params;
     }
-
 }

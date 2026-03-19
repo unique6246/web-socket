@@ -1,44 +1,79 @@
 package com.example.websocket.fileStorage;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @Service
 public class FileStorageService {
 
-    private final Path fileStorageLocation;
+    private final Cloudinary cloudinary;
 
-    public FileStorageService(@Value("${file.upload-dir}") String uploadDir) {
-        this.fileStorageLocation = Paths.get(uploadDir).toAbsolutePath().normalize();
+    public FileStorageService(Cloudinary cloudinary) {
+        this.cloudinary = cloudinary;
+    }
+
+    /**
+     * Uploads a file to Cloudinary and returns a UploadResult
+     * containing the secure CDN URL and the public_id (for deletion).
+     */
+    public UploadResult storeFile(MultipartFile file) {
+        String originalFileName = StringUtils.cleanPath(
+                Objects.requireNonNull(file.getOriginalFilename()));
+
+        if (originalFileName.contains("..")) {
+            throw new RuntimeException("Invalid file name: " + originalFileName);
+        }
+
+        // Determine folder and resource type
+        String contentType = file.getContentType() != null ? file.getContentType() : "";
+        String resourceType = contentType.startsWith("image/") ? "image"
+                            : contentType.startsWith("video/") ? "video"
+                            : "raw"; // raw = any other file type (pdf, doc, zip …)
+
+        // Use a unique public_id so filenames never collide
+        String publicId = "chat-files/" + UUID.randomUUID() + "_"
+                + originalFileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+
         try {
-            Files.createDirectories(this.fileStorageLocation); // Create directory if not exists
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = cloudinary.uploader().upload(
+                    file.getBytes(),
+                    ObjectUtils.asMap(
+                            "public_id",     publicId,
+                            "resource_type", resourceType,
+                            "overwrite",     false
+                    )
+            );
+
+            String secureUrl = (String) result.get("secure_url");
+            String returnedPublicId = (String) result.get("public_id");
+            return new UploadResult(secureUrl, returnedPublicId, resourceType);
+
         } catch (Exception ex) {
-            throw new RuntimeException("Could not create upload directory.", ex);
+            throw new RuntimeException("Cloudinary upload failed for: " + originalFileName, ex);
         }
     }
 
-    public String storeFile(MultipartFile file) {
-        String fileName = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
+    /**
+     * Deletes a previously uploaded file from Cloudinary by its public_id.
+     */
+    public void deleteFile(String publicId, String resourceType) {
         try {
-            if (fileName.contains("..")) {
-                throw new RuntimeException("Invalid path sequence: " + fileName);
-            }
-            Path targetLocation = this.fileStorageLocation.resolve(fileName);
-            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
-
-            // Return the URL to access the file
-            return "/uploads/" + fileName; // Assuming the WebMvcConfig allows access to /uploads
-        } catch (IOException ex) {
-            throw new RuntimeException("Could not store file " + fileName, ex);
+            cloudinary.uploader().destroy(publicId,
+                    ObjectUtils.asMap("resource_type", resourceType));
+        } catch (Exception ex) {
+            // Log but don't fail — deletion is best-effort
+            System.err.println("Cloudinary delete failed for " + publicId + ": " + ex.getMessage());
         }
     }
+
+    /** Simple value object returned after a successful upload. */
+    public record UploadResult(String fileUrl, String publicId, String resourceType) {}
 }
