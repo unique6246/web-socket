@@ -313,7 +313,8 @@ body {
 }
 .container h2 { margin-bottom:20px; font-size:1.4em; color:#1e293b; text-align:center; }
 .container input[type="text"],
-.container input[type="password"] { width:100%; padding:11px 14px; margin:8px 0; border:1px solid var(--border); border-radius:8px; font-size:.95em; outline:none; font-family:inherit; }
+.container input[type="password"],
+.container input[type="email"] { width:100%; padding:11px 14px; margin:8px 0; border:1px solid var(--border); border-radius:8px; font-size:.95em; outline:none; font-family:inherit; }
 .container input:focus { border-color:var(--primary); }
 .container button[type="submit"] { width:100%; padding:11px; margin-top:14px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-size:1em; font-weight:600; cursor:pointer; font-family:inherit; }
 .container button[type="submit"]:hover { background:var(--primary-dark); }

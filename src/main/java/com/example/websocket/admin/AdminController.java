@@ -13,6 +13,8 @@ import com.example.websocket.service.ChatRoomService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -98,8 +100,20 @@ public class AdminController {
     }
 
     @PostMapping("/chatrooms")
-    public ResponseEntity<ChatRoom> createChatRoom(@RequestBody ChatRoom chatRoom) {
-        return ResponseEntity.ok(chatRoomRepository.save(chatRoom));
+    public ResponseEntity<?> createChatRoom(@RequestBody Map<String, String> body,
+                                             @AuthenticationPrincipal UserDetails userDetails) {
+        String roomName = body.get("roomName");
+        if (roomName == null || roomName.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Room name is required."));
+        }
+        String adminUsername = userDetails.getUsername();
+        // createGroupRoom adds the admin as the first member with groupAdmin = true
+        ChatRoom room = chatRoomService.createGroupRoom(
+                roomName,
+                java.util.List.of(adminUsername),
+                adminUsername
+        );
+        return ResponseEntity.ok(room);
     }
 
     @DeleteMapping("/chatrooms/{id}")
