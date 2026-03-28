@@ -151,7 +151,6 @@ public class ChatController {
 
     /** Add a user to a group room */
     @PostMapping("/rooms/{roomName}/add-member/{username}")
-    @Transactional(readOnly = true)
     public ResponseEntity<?> addMemberToGroup(@PathVariable String roomName,
                                               @PathVariable String username) {
         ChatRoom room = chatRoomService.getRoomDetails(roomName);

@@ -2,9 +2,9 @@ package com.example.websocket.service;
 
 import com.example.websocket.model.*;
 import com.example.websocket.repo.*;
-import jakarta.transaction.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
@@ -33,6 +33,7 @@ public class ChatRoomService {
         return chatRoomUserRepository.findRoomNamesByUsername(username);
     }
 
+    @Transactional(readOnly = true)
     public List<Map<String, String>> getRoomsWithTypeByUserName(String username) {
         List<String> roomNames = chatRoomUserRepository.findRoomNamesByUsername(username);
         List<Map<String, String>> result = new ArrayList<>();
@@ -172,6 +173,7 @@ public class ChatRoomService {
     }
 
     /** Returns "ADMIN" if the user is group admin of the room, else "MEMBER" */
+    @Transactional(readOnly = true)
     public String getMyRoleInRoom(String roomName, String username) {
         ChatRoom room = chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
@@ -222,6 +224,7 @@ public class ChatRoomService {
         chatRoomRepository.deleteById(roomId);
     }
 
+    @Transactional(readOnly = true)
     public ChatRoom getRoomDetails(String roomName) {
         return chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
