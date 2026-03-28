@@ -1,20 +1,14 @@
 package com.example.websocket.admin;
 
-import com.example.websocket.model.ChatRoom;
-import com.example.websocket.model.ChatRoomUser;
-import com.example.websocket.model.Role;
-import com.example.websocket.model.User;
-import com.example.websocket.repo.ChatRoomRepository;
-import com.example.websocket.repo.MessageRepository;
-import com.example.websocket.repo.RoleRepository;
-import com.example.websocket.repo.UserRepository;
+import com.example.websocket.model.*;
+import com.example.websocket.repo.*;
 import com.example.websocket.service.AuthService;
 import com.example.websocket.service.ChatRoomService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -32,7 +26,6 @@ public class AdminController {
     private final AuthService authService;
     private final ChatRoomService chatRoomService;
 
-    @Autowired
     public AdminController(UserRepository userRepository,
                            ChatRoomRepository chatRoomRepository,
                            MessageRepository messageRepository,
@@ -47,17 +40,23 @@ public class AdminController {
         this.chatRoomService = chatRoomService;
     }
 
-    // ── User Management ──────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  USER MANAGEMENT
+    // ─────────────────────────────────────────────────────────────────────────
 
     @GetMapping("/users")
-    public List<User> getAllUsers() {
-        return userRepository.findAll();
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getAllUsers() {
+        return userRepository.findAll().stream()
+                .map(this::toUserDto)
+                .collect(Collectors.toList());
     }
 
     @GetMapping("/users/{id}")
-    public ResponseEntity<User> getUserById(@PathVariable Long id) {
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getUserById(@PathVariable Long id) {
         return userRepository.findById(id)
-                .map(ResponseEntity::ok)
+                .map(u -> ResponseEntity.ok(toUserDto(u)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -74,46 +73,47 @@ public class AdminController {
     }
 
     @PutMapping("/users/{username}/roles/assign")
-    public ResponseEntity<?> assignRole(@PathVariable String username, @RequestBody Map<String, String> body) {
-        String roleName = body.get("role");
-        return authService.assignRole(username, roleName);
+    public ResponseEntity<?> assignRole(@PathVariable String username,
+                                         @RequestBody Map<String, String> body) {
+        return authService.assignRole(username, body.get("role"));
     }
 
     @PutMapping("/users/{username}/roles/remove")
-    public ResponseEntity<?> removeRole(@PathVariable String username, @RequestBody Map<String, String> body) {
-        String roleName = body.get("role");
-        return authService.removeRole(username, roleName);
+    public ResponseEntity<?> removeRole(@PathVariable String username,
+                                         @RequestBody Map<String, String> body) {
+        return authService.removeRole(username, body.get("role"));
     }
 
-    // ── Chat Room Management ──────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  CHAT ROOM MANAGEMENT
+    // ─────────────────────────────────────────────────────────────────────────
 
     @GetMapping("/chatrooms")
-    public List<ChatRoom> getAllChatRooms() {
-        return chatRoomRepository.findAll();
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getAllChatRooms() {
+        return chatRoomRepository.findAll().stream()
+                .map(this::toRoomDto)
+                .collect(Collectors.toList());
     }
 
     @GetMapping("/chatrooms/{id}")
-    public ResponseEntity<ChatRoom> getChatRoomById(@PathVariable Long id) {
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getChatRoomById(@PathVariable Long id) {
         return chatRoomRepository.findById(id)
-                .map(ResponseEntity::ok)
+                .map(r -> ResponseEntity.ok(toRoomDto(r)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/chatrooms")
+    @Transactional
     public ResponseEntity<?> createChatRoom(@RequestBody Map<String, String> body,
                                              @AuthenticationPrincipal UserDetails userDetails) {
         String roomName = body.get("roomName");
-        if (roomName == null || roomName.isBlank()) {
+        if (roomName == null || roomName.isBlank())
             return ResponseEntity.badRequest().body(Map.of("error", "Room name is required."));
-        }
-        String adminUsername = userDetails.getUsername();
-        // createGroupRoom adds the admin as the first member with groupAdmin = true
         ChatRoom room = chatRoomService.createGroupRoom(
-                roomName,
-                java.util.List.of(adminUsername),
-                adminUsername
-        );
-        return ResponseEntity.ok(room);
+                roomName, List.of(userDetails.getUsername()), userDetails.getUsername());
+        return ResponseEntity.ok(toRoomDto(room));
     }
 
     @DeleteMapping("/chatrooms/{id}")
@@ -123,40 +123,50 @@ public class AdminController {
     }
 
     @GetMapping("/chatrooms/{id}/users")
-    public ResponseEntity<Set<User>> getUsersInChatRoom(@PathVariable Long id) {
-        return chatRoomRepository.findById(id).map(room -> {
-            Set<User> users = room.getChatRoomUsers().stream()
-                    .map(ChatRoomUser::getUser)
-                    .collect(Collectors.toSet());
-            return ResponseEntity.ok(users);
-        }).orElse(ResponseEntity.notFound().build());
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getUsersInRoom(@PathVariable Long id) {
+        return chatRoomRepository.findById(id).map(room ->
+            ResponseEntity.ok(
+                room.getChatRoomUsers().stream()
+                    .map(cru -> toUserDto(cru.getUser()))
+                    .collect(Collectors.toList())
+            )
+        ).orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/users/{id}/chatrooms")
-    public ResponseEntity<Set<ChatRoom>> getChatRoomsForUser(@PathVariable Long id) {
-        return userRepository.findById(id).map(u -> {
-            Set<ChatRoom> chatRooms = u.getChatRoomUsers().stream()
-                    .map(ChatRoomUser::getChatRoom)
-                    .collect(Collectors.toSet());
-            return ResponseEntity.ok(chatRooms);
-        }).orElse(ResponseEntity.notFound().build());
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getRoomsForUser(@PathVariable Long id) {
+        return userRepository.findById(id).map(u ->
+            ResponseEntity.ok(
+                u.getChatRoomUsers().stream()
+                    .map(cru -> toRoomDto(cru.getChatRoom()))
+                    .collect(Collectors.toList())
+            )
+        ).orElse(ResponseEntity.notFound().build());
     }
 
-    // ── Roles ────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  ROLES
+    // ─────────────────────────────────────────────────────────────────────────
 
     @GetMapping("/roles")
-    public List<Role> getAllRoles() {
-        return roleRepository.findAll();
+    public List<Map<String, Object>> getAllRoles() {
+        return roleRepository.findAll().stream()
+                .map(r -> Map.<String, Object>of("id", r.getId(), "name", r.getName()))
+                .collect(Collectors.toList());
     }
 
-    // ── Statistics ────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  STATISTICS
+    // ─────────────────────────────────────────────────────────────────────────
 
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Long>> getStats() {
         Map<String, Long> stats = new LinkedHashMap<>();
-        stats.put("totalUsers", userRepository.count());
+        stats.put("totalUsers",     userRepository.count());
         stats.put("totalChatRooms", chatRoomRepository.count());
-        stats.put("totalMessages", messageRepository.count());
+        stats.put("totalMessages",  messageRepository.count());
         return ResponseEntity.ok(stats);
     }
 
@@ -166,10 +176,51 @@ public class AdminController {
     }
 
     @GetMapping("/users/{id}/chatrooms/count")
+    @Transactional(readOnly = true)
     public ResponseEntity<Long> getChatRoomCountForUser(@PathVariable Long id) {
-        return userRepository.findById(id).map(u -> {
-            long count = u.getChatRoomUsers().size();
-            return ResponseEntity.ok(count);
-        }).orElse(ResponseEntity.notFound().build());
+        return userRepository.findById(id)
+                .map(u -> ResponseEntity.ok((long) u.getChatRoomUsers().size()))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  DTO helpers  (never expose raw JPA entities to Jackson)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Flat, safe representation of a User — no lazy collections. */
+    private Map<String, Object> toUserDto(User u) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id",           u.getId());
+        m.put("username",     u.getUsername());
+        m.put("email",        u.getEmail()       != null ? u.getEmail()       : "");
+        m.put("displayName",  u.getDisplayName() != null ? u.getDisplayName() : u.getUsername());
+        m.put("phone",        u.getPhone()       != null ? u.getPhone()       : "");
+        m.put("avatarUrl",    u.getAvatarUrl()   != null ? u.getAvatarUrl()   : "");
+        m.put("bio",          u.getBio()         != null ? u.getBio()         : "");
+        m.put("status",       u.getStatus()      != null ? u.getStatus().name(): "OFFLINE");
+        m.put("emailVerified", u.isEmailVerified());
+        m.put("createdAt",    u.getCreatedAt()   != null ? u.getCreatedAt().toString() : "");
+        // Roles are EAGER so safe to access
+        List<Map<String, Object>> roles = u.getRoles().stream()
+                .map(r -> Map.<String, Object>of("id", r.getId(), "name", r.getName()))
+                .collect(Collectors.toList());
+        m.put("roles", roles);
+        return m;
+    }
+
+    /** Flat, safe representation of a ChatRoom — uses member count, not the full collection. */
+    private Map<String, Object> toRoomDto(ChatRoom r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id",          r.getId());
+        m.put("roomName",    r.getRoomName());
+        m.put("type",        r.getType()        != null ? r.getType()        : "GROUP");
+        m.put("description", r.getDescription() != null ? r.getDescription() : "");
+        m.put("avatarUrl",   r.getAvatarUrl()   != null ? r.getAvatarUrl()   : "");
+        m.put("isPrivate",   r.isPrivate());
+        m.put("createdBy",   r.getCreatedBy()   != null ? r.getCreatedBy()   : "");
+        m.put("createdAt",   r.getCreatedAt()   != null ? r.getCreatedAt().toString() : "");
+        // Safe: use size() while the collection is still in the open session (called from @Transactional method)
+        m.put("memberCount", r.getChatRoomUsers() != null ? r.getChatRoomUsers().size() : 0);
+        return m;
     }
 }

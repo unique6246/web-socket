@@ -10,22 +10,81 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="container">
-    <h2>Create Account</h2>
-    <div id="registerError" class="error-msg" style="display:none;"></div>
-    <div id="registerSuccess" class="success-msg" style="display:none;"></div>
-    <form id="registerForm">
-        <input type="text"     id="newUsername"     placeholder="Username (3–50 chars)"   required autocomplete="username"     maxlength="50" minlength="3">
-        <input type="email"    id="newEmail"         placeholder="Email address"            required autocomplete="email"         maxlength="100">
-        <input type="password" id="newPassword"      placeholder="Password (min 8 chars)"  required autocomplete="new-password"  maxlength="128">
-        <input type="password" id="confirmPassword"  placeholder="Confirm Password"         required autocomplete="new-password"  maxlength="128">
-        <small style="color:#94a3b8;font-size:.8em;">
-            Password must be at least 8 characters and include uppercase, lowercase, digit, and special character.
-        </small>
-        <button type="submit">Register</button>
-    </form>
-    <p>Already have an account? <a href="/api/v1/login">Login here</a></p>
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="auth-logo">💬</div>
+        <h1 class="auth-title">Create Account</h1>
+        <p class="auth-sub">Join ChatApp and start chatting</p>
+
+        <div id="registerError" class="error-msg" style="display:none;"></div>
+        <div id="registerSuccess" class="success-msg" style="display:none;"></div>
+
+        <form id="registerForm" class="auth-form" novalidate>
+            <div class="form-group">
+                <label for="newUsername">Username <span class="req">*</span></label>
+                <input type="text" id="newUsername" placeholder="3–50 chars, letters/numbers/_.-" required
+                       autocomplete="username" maxlength="50" minlength="3"
+                       pattern="^[a-zA-Z0-9_.\-]+$">
+                <div class="field-hint">Letters, numbers, underscores, dots, hyphens only</div>
+            </div>
+            <div class="form-group">
+                <label for="newDisplayName">Display Name</label>
+                <input type="text" id="newDisplayName" placeholder="How others see you (optional)" maxlength="80">
+            </div>
+            <div class="form-group">
+                <label for="newEmail">Email <span class="req">*</span></label>
+                <input type="email" id="newEmail" placeholder="you@example.com" required autocomplete="email" maxlength="100">
+            </div>
+            <div class="form-group">
+                <label for="newPhone">Phone (optional)</label>
+                <input type="tel" id="newPhone" placeholder="+1 555 000 0000" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label for="newPassword">Password <span class="req">*</span></label>
+                <div class="pw-wrap">
+                    <input type="password" id="newPassword" placeholder="Min 8 chars with uppercase, digit, symbol"
+                           required autocomplete="new-password" maxlength="128">
+                    <button type="button" class="pw-toggle" onclick="togglePw('newPassword', this)" tabindex="-1">👁</button>
+                </div>
+                <div class="pw-strength-bar"><div id="pwStrengthFill" class="pw-strength-fill"></div></div>
+                <div id="pwStrengthLabel" class="field-hint"></div>
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword">Confirm Password <span class="req">*</span></label>
+                <div class="pw-wrap">
+                    <input type="password" id="confirmPassword" placeholder="Repeat your password"
+                           required autocomplete="new-password" maxlength="128">
+                    <button type="button" class="pw-toggle" onclick="togglePw('confirmPassword', this)" tabindex="-1">👁</button>
+                </div>
+            </div>
+            <button type="submit" class="btn-auth" id="registerBtn">Create Account</button>
+        </form>
+
+        <div class="auth-divider"><span>or</span></div>
+        <p class="auth-switch">Already have an account? <a href="/api/v1/login">Sign in</a></p>
+    </div>
 </div>
 <script src="/script.js"></script>
+<script>
+    // Live password strength meter
+    document.getElementById("newPassword")?.addEventListener("input", function() {
+        const fill  = document.getElementById("pwStrengthFill");
+        const label = document.getElementById("pwStrengthLabel");
+        const v = this.value;
+        let score = 0;
+        if (v.length >= 8)  score++;
+        if (/[A-Z]/.test(v)) score++;
+        if (/[a-z]/.test(v)) score++;
+        if (/\d/.test(v))    score++;
+        if (/[^a-zA-Z0-9]/.test(v)) score++;
+        const pct   = (score / 5) * 100;
+        const colors = ["", "#ef4444","#f97316","#eab308","#22c55e","#16a34a"];
+        const labels = ["", "Very Weak","Weak","Fair","Strong","Very Strong"];
+        fill.style.width = pct + "%";
+        fill.style.background = colors[score] || "#e2e8f0";
+        label.textContent = score > 0 ? labels[score] : "";
+        label.style.color = colors[score] || "#94a3b8";
+    });
+</script>
 </body>
 </html>

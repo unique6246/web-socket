@@ -9,14 +9,15 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * Kafka event payload for a chat message.
- * Produced by the server that receives the WebSocket message,
- * consumed by all server instances to broadcast to their local sessions.
+ * Kafka event payload for a chat message and all real-time events.
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChatMessageEvent implements Serializable {
+
+    /** Type of event — governs routing in consumer and UI */
+    private EventType eventType = EventType.MESSAGE;
 
     /** The authenticated sender username */
     private String sender;
@@ -24,7 +25,7 @@ public class ChatMessageEvent implements Serializable {
     /** Target chat room */
     private String roomName;
 
-    /** Text content (may be null for file-only messages) */
+    /** Text content (may be null for file-only messages or non-MESSAGE events) */
     private String content;
 
     /** Cloudinary / remote file URL */
@@ -40,9 +41,57 @@ public class ChatMessageEvent implements Serializable {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime timestamp;
 
-    /**
-     * ID of the originating server instance (hostname / INSTANCE_ID env var).
-     * Useful for debugging multi-node fan-out.
-     */
+    /** ID of the originating server instance */
     private String originServerId;
+
+    // ── Fields used by non-MESSAGE event types ───────────────────────
+
+    /** DB message ID (used for REACTION, MESSAGE_EDIT, MESSAGE_DELETE, PIN) */
+    private Long messageId;
+
+    /** Emoji (used for REACTION events) */
+    private String reactionEmoji;
+
+    /** Whether user is currently typing (used for TYPING events) */
+    private Boolean isTyping;
+
+    /** Presence status string, e.g. "ONLINE", "OFFLINE" (used for PRESENCE events) */
+    private String presenceStatus;
+
+    /** Reply-to message ID (used when sending a reply) */
+    private Long replyToMessageId;
+
+    /** Notification recipient username (used for NOTIFICATION events) */
+    private String recipientUsername;
+
+    /** Notification ID (used for NOTIFICATION events) */
+    private Long notificationId;
+
+    /** Convenience constructor for a basic chat message (backward compat) */
+    public ChatMessageEvent(String sender, String roomName, String content,
+                             String fileUrl, String fileType, String fileName,
+                             LocalDateTime timestamp, String originServerId) {
+        this.eventType = EventType.MESSAGE;
+        this.sender = sender;
+        this.roomName = roomName;
+        this.content = content;
+        this.fileUrl = fileUrl;
+        this.fileType = fileType;
+        this.fileName = fileName;
+        this.timestamp = timestamp;
+        this.originServerId = originServerId;
+    }
+
+    public enum EventType {
+        MESSAGE,
+        TYPING,
+        READ_RECEIPT,
+        PRESENCE,
+        REACTION,
+        MESSAGE_EDIT,
+        MESSAGE_DELETE,
+        PIN,
+        NOTIFICATION,
+        UNREAD_COUNT
+    }
 }

@@ -60,18 +60,39 @@ public class ChatRoomService {
     }
 
     @Transactional
-    public void saveMessage(String roomName, String sender, String msgContent, String fileUrl, String fileType, String fileName) {
+    public Message saveMessage(String roomName, String sender, String msgContent, String fileUrl, String fileType, String fileName) {
+        return saveMessage(roomName, sender, msgContent, fileUrl, fileType, fileName, null);
+    }
+
+    @Transactional
+    public Message saveMessage(String roomName, String sender, String msgContent, String fileUrl, String fileType, String fileName, Long replyToMessageId) {
         ChatRoom chatRoom = chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
         Message msg = new Message();
-        msg.setContent(msgContent);
         msg.setSender(sender);
-        msg.setFileUrl(fileUrl);
-        msg.setFileType(fileType);
-        msg.setFileName(fileName);
         msg.setChatRoom(chatRoom);
         msg.setTimestamp(LocalDateTime.now());
-        messageRepository.save(msg);
+
+        // Set reply-to if provided
+        if (replyToMessageId != null) {
+            messageRepository.findById(replyToMessageId).ifPresent(msg::setReplyTo);
+        }
+
+        boolean hasFile = fileUrl != null && !fileUrl.isBlank();
+
+        if (hasFile) {
+            msg.setFileUrl(fileUrl);
+            msg.setFileType(fileType);
+            msg.setFileName(fileName);
+            msg.setContent(msgContent != null && !msgContent.isBlank() ? msgContent : null);
+            boolean isImage = fileType != null && fileType.toLowerCase().startsWith("image/");
+            msg.setMessageType(isImage ? MessageType.IMAGE : MessageType.FILE);
+        } else {
+            msg.setContent(msgContent);
+            msg.setMessageType(MessageType.TEXT);
+        }
+
+        return messageRepository.save(msg);
     }
 
     @Transactional
@@ -204,6 +225,16 @@ public class ChatRoomService {
     public ChatRoom getRoomDetails(String roomName) {
         return chatRoomRepository.findByRoomName(roomName)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
+    }
+
+    /** Returns all member usernames in a room — used for unread-count push. */
+    @Transactional
+    public List<String> getMemberUsernames(String roomName) {
+        return chatRoomRepository.findByRoomName(roomName)
+                .map(room -> room.getChatRoomUsers().stream()
+                        .map(cru -> cru.getUser().getUsername())
+                        .collect(java.util.stream.Collectors.toList()))
+                .orElse(java.util.Collections.emptyList());
     }
 
     public List<ChatRoom> getAllRooms() {

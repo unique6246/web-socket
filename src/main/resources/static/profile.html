@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob: https:; object-src 'none';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <title>Profile – ChatApp</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="chat-page">
+
+<!-- Top Nav -->
+<nav class="topnav">
+    <span class="topnav-brand"><a href="/api/v1/chat" style="color:inherit;text-decoration:none;">💬 ChatApp</a></span>
+    <div class="topnav-right">
+        <span id="loggedInUser" class="nav-username"></span>
+        <a href="/api/v1/chat" class="nav-link">← Back to Chat</a>
+        <button id="logoutButton" class="nav-btn danger">Logout</button>
+    </div>
+</nav>
+
+<div class="profile-page">
+    <div class="profile-card">
+
+        <!-- Avatar section -->
+        <div class="profile-avatar-section">
+            <div class="profile-avatar-wrap">
+                <img id="profileAvatar" src="" alt="Avatar" class="profile-avatar-img" onerror="this.style.display='none';document.getElementById('profileAvatarFallback').style.display='flex'">
+                <div id="profileAvatarFallback" class="profile-avatar-fallback" style="display:none;"></div>
+                <label for="avatarFileInput" class="avatar-upload-btn" title="Change photo">📷</label>
+                <input type="file" id="avatarFileInput" accept="image/*" style="display:none">
+            </div>
+            <div class="profile-avatar-info">
+                <h2 id="profileDisplayNameTitle">Loading…</h2>
+                <span id="profileUsernameTitle" class="profile-username-tag">@</span>
+                <div id="emailVerifiedBadge" class="verified-badge" style="display:none;">✅ Email Verified</div>
+                <div id="emailUnverifiedBadge" class="unverified-badge" style="display:none;">⚠️ Email not verified</div>
+            </div>
+        </div>
+
+        <div id="profileSuccess" class="success-msg" style="display:none;margin:0 0 14px;"></div>
+        <div id="profileError"   class="error-msg"   style="display:none;margin:0 0 14px;"></div>
+
+        <!-- Edit form -->
+        <form id="profileForm" class="profile-form">
+            <div class="profile-section-label">Personal Info</div>
+
+            <div class="form-group">
+                <label for="pfDisplayName">Display Name</label>
+                <input type="text" id="pfDisplayName" placeholder="Your display name" maxlength="80">
+            </div>
+            <div class="form-group">
+                <label for="pfBio">Bio</label>
+                <textarea id="pfBio" placeholder="Tell others about yourself…" maxlength="300" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="pfPhone">Phone</label>
+                <input type="tel" id="pfPhone" placeholder="+1 555 000 0000" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label for="pfStatus">Status</label>
+                <select id="pfStatus">
+                    <option value="ONLINE">🟢 Online</option>
+                    <option value="AWAY">🟡 Away</option>
+                    <option value="DND">🔴 Do Not Disturb</option>
+                    <option value="OFFLINE">⚫ Appear Offline</option>
+                </select>
+            </div>
+            <button type="submit" class="btn-auth" id="saveProfileBtn">Save Changes</button>
+        </form>
+
+        <!-- Change password section -->
+        <div class="profile-section-label" style="margin-top:28px;">Security</div>
+        <div id="pwChangeSuccess" class="success-msg" style="display:none;margin:0 0 10px;"></div>
+        <div id="pwChangeError"   class="error-msg"   style="display:none;margin:0 0 10px;"></div>
+        <form id="changePasswordForm" class="profile-form">
+            <div class="form-group">
+                <label for="oldPwd">Current Password</label>
+                <div class="pw-wrap">
+                    <input type="password" id="oldPwd" placeholder="Current password" autocomplete="current-password">
+                    <button type="button" class="pw-toggle" onclick="togglePw('oldPwd', this)" tabindex="-1">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="newPwdPf">New Password</label>
+                <div class="pw-wrap">
+                    <input type="password" id="newPwdPf" placeholder="New password" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" onclick="togglePw('newPwdPf', this)" tabindex="-1">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="confirmPwdPf">Confirm New Password</label>
+                <div class="pw-wrap">
+                    <input type="password" id="confirmPwdPf" placeholder="Confirm new password" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" onclick="togglePw('confirmPwdPf', this)" tabindex="-1">👁</button>
+                </div>
+            </div>
+            <button type="submit" class="btn-auth btn-outline" id="changePwBtn">Change Password</button>
+        </form>
+    </div>
+</div>
+
+<script src="/script.js"></script>
+<script>
+(async function initProfile() {
+    const ok = await requireAuth();
+    if (!ok) return;
+
+    const username = getUsername();
+    document.getElementById("loggedInUser").textContent = getDisplayName();
+
+    // Load profile data
+    try {
+        const r = await fetchWithAuth(`/api/users/${encodeURIComponent(username)}/profile`);
+        const p = await r.json();
+        document.getElementById("profileDisplayNameTitle").textContent = p.displayName || username;
+        document.getElementById("profileUsernameTitle").textContent    = "@" + username;
+        document.getElementById("pfDisplayName").value = p.displayName || "";
+        document.getElementById("pfBio").value         = p.bio || "";
+        document.getElementById("pfPhone").value       = p.phone || "";
+        document.getElementById("pfStatus").value      = p.status || "ONLINE";
+        if (p.avatarUrl) {
+            const img = document.getElementById("profileAvatar");
+            img.src = p.avatarUrl; img.style.display = "block";
+        } else {
+            document.getElementById("profileAvatarFallback").textContent = username.charAt(0).toUpperCase();
+            document.getElementById("profileAvatarFallback").style.display = "flex";
+        }
+        document.getElementById("emailVerifiedBadge").style.display   = p.emailVerified ? "inline-flex" : "none";
+        document.getElementById("emailUnverifiedBadge").style.display = p.emailVerified ? "none" : "inline-flex";
+    } catch(e) {
+        document.getElementById("profileError").textContent = "Failed to load profile.";
+        document.getElementById("profileError").style.display = "block";
+    }
+
+    // Save profile
+    document.getElementById("profileForm")?.addEventListener("submit", async function(e) {
+        e.preventDefault();
+        const btn = document.getElementById("saveProfileBtn");
+        btn.disabled = true; btn.textContent = "Saving…";
+        try {
+            await fetchWithAuth("/api/auth/update-profile", {
+                method: "PUT",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({
+                    displayName: document.getElementById("pfDisplayName").value.trim(),
+                    bio:         document.getElementById("pfBio").value.trim(),
+                    phone:       document.getElementById("pfPhone").value.trim(),
+                    status:      document.getElementById("pfStatus").value
+                })
+            });
+            sessionStorage.setItem("displayName", document.getElementById("pfDisplayName").value.trim() || username);
+            document.getElementById("profileSuccess").textContent = "Profile updated!";
+            document.getElementById("profileSuccess").style.display = "block";
+            setTimeout(() => document.getElementById("profileSuccess").style.display = "none", 3000);
+        } catch(err) {
+            document.getElementById("profileError").textContent = err.message;
+            document.getElementById("profileError").style.display = "block";
+        }
+        btn.disabled = false; btn.textContent = "Save Changes";
+    });
+
+    // Change password
+    document.getElementById("changePasswordForm")?.addEventListener("submit", async function(e) {
+        e.preventDefault();
+        const oldPwd  = document.getElementById("oldPwd").value;
+        const newPwd  = document.getElementById("newPwdPf").value;
+        const confirm = document.getElementById("confirmPwdPf").value;
+        const errEl = document.getElementById("pwChangeError");
+        const okEl  = document.getElementById("pwChangeSuccess");
+        errEl.style.display = "none"; okEl.style.display = "none";
+        if (newPwd !== confirm) { errEl.textContent = "Passwords do not match."; errEl.style.display = "block"; return; }
+        const btn = document.getElementById("changePwBtn");
+        btn.disabled = true; btn.textContent = "Changing…";
+        try {
+            await fetchWithAuth("/api/auth/change-password", {
+                method: "POST",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
+            });
+            okEl.textContent = "Password changed successfully.";
+            okEl.style.display = "block";
+            this.reset();
+        } catch(err) {
+            errEl.textContent = err.message;
+            errEl.style.display = "block";
+        }
+        btn.disabled = false; btn.textContent = "Change Password";
+    });
+
+    // Avatar upload
+    document.getElementById("avatarFileInput")?.addEventListener("change", async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        const fd = new FormData(); fd.append("file", file);
+        try {
+            const r = await fetchWithAuth("/api/users/me/avatar", { method: "POST", body: fd });
+            const d = await r.json();
+            document.getElementById("profileAvatar").src = d.avatarUrl;
+            document.getElementById("profileAvatar").style.display = "block";
+            document.getElementById("profileAvatarFallback").style.display = "none";
+            sessionStorage.setItem("avatarUrl", d.avatarUrl);
+            document.getElementById("profileSuccess").textContent = "Avatar updated!";
+            document.getElementById("profileSuccess").style.display = "block";
+            setTimeout(() => document.getElementById("profileSuccess").style.display = "none", 3000);
+        } catch(err) {
+            document.getElementById("profileError").textContent = "Avatar upload failed: " + err.message;
+            document.getElementById("profileError").style.display = "block";
+        }
+        e.target.value = "";
+    });
+
+    // Logout
+    document.getElementById("logoutButton")?.addEventListener("click", () => {
+        fetch("/api/auth/logout", { method: "POST", credentials: "include" })
+            .finally(() => { clearSession(); window.location.href = "/api/v1/login"; });
+    });
+})();
+</script>
+</body>
+</html>

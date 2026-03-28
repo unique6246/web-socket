@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Getter
 @Setter
@@ -25,7 +27,31 @@ public class ChatRoomUser {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    /** true only for the user who created the group */
+    /** Role in this room */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private RoomRole roomRole = RoomRole.MEMBER;
+
+    /** When user joined */
     @Column(nullable = false)
-    private boolean groupAdmin = false;
+    private LocalDateTime joinedAt;
+
+    /** ID of the last message the user has read in this room */
+    private Long lastReadMessageId;
+
+    /** Mute notifications for this room */
+    @Column(nullable = false)
+    private boolean isMuted = false;
+
+    @PrePersist
+    protected void onCreate() { joinedAt = LocalDateTime.now(); }
+
+    // ── backward-compat helper (code that still uses isGroupAdmin()) ──────
+    public boolean isGroupAdmin() {
+        return roomRole == RoomRole.OWNER || roomRole == RoomRole.ADMIN;
+    }
+
+    public void setGroupAdmin(boolean admin) {
+        this.roomRole = admin ? RoomRole.ADMIN : RoomRole.MEMBER;
+    }
 }

@@ -97,6 +97,35 @@ services:
     networks:
       - chatapp-net
 
+  # ── Redis (session store, presence, token blacklist) ─────────
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatapp-net
+
+  # ── MailHog (local SMTP for dev email testing) ────────────────
+  # SMTP:  localhost:1025  |  Web UI: http://localhost:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: chatapp-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"           # SMTP
+      - "8025:8025"           # Web UI
+    networks:
+      - chatapp-net
+
   # ── Spring Boot App — Server Instance 1 ───────────────────────
   app:
     build:
@@ -105,18 +134,28 @@ services:
     container_name: chatapp-app
     restart: unless-stopped
     ports:
-      - "8085:8080"           # host:container — change 8085 if already in use
+      - "8085:8080"
     env_file:
-      - .env                  # load all variables from .env
+      - .env
     environment:
-      DB_HOST:    mysql
-      KAFKA_HOST: kafka
-      KAFKA_PORT: 9092
-      INSTANCE_ID: server-1
+      DB_HOST:      mysql
+      KAFKA_HOST:   kafka
+      KAFKA_PORT:   9092
+      REDIS_HOST:   redis
+      REDIS_PORT:   6379
+      SMTP_HOST:    mailhog
+      SMTP_PORT:    1025
+      SMTP_AUTH:    "false"
+      SMTP_STARTTLS: "false"
+      EMAIL_ENABLED: "true"
+      APP_BASE_URL:  "http://localhost:8085"
+      INSTANCE_ID:  server-1
     depends_on:
       mysql:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - chatapp-net
@@ -126,6 +165,8 @@ volumes:
   mysql_data:
     driver: local
   kafka_data:
+    driver: local
+  redis_data:
     driver: local
 
 # ── Network ───────────────────────────────────────────────────

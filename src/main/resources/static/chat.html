@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob: https:; object-src 'none'; frame-ancestors 'none';">
   <title>ChatApp</title>
   <link rel="stylesheet" href="/style.css"/>
 </head>
@@ -15,9 +15,15 @@
 <nav class="topnav">
   <span class="topnav-brand">💬 ChatApp</span>
   <div class="topnav-right">
-    <span id="loggedInUser" class="nav-username"></span>
-    <span id="roleBadge" class="role-badge" style="display:none;"></span>
+    <button id="notifBtn" class="icon-btn notif-btn" title="Notifications">
+      🔔
+      <span id="notifBadge" class="notif-badge" style="display:none;">0</span>
+    </button>
     <a id="adminPanelLink" href="/api/v1/dashboard" class="nav-link" style="display:none;">🛡 Admin</a>
+    <a href="/api/v1/profile" class="nav-user-chip" id="navUserChip">
+      <div id="navAvatar" class="nav-avatar"></div>
+      <span id="loggedInUser" class="nav-username"></span>
+    </a>
     <button id="logoutButton" class="nav-btn danger">Logout</button>
   </div>
 </nav>
@@ -27,8 +33,6 @@
 
   <!-- ─────────── SIDEBAR ─────────── -->
   <aside class="sidebar">
-
-    <!-- Sidebar tabs -->
     <div class="sidebar-tabs">
       <button class="stab active" data-tab="people">👥 People</button>
       <button class="stab" data-tab="dms">💬 DMs</button>
@@ -43,25 +47,18 @@
       <div class="tab-search">
         <input id="peopleSearch" type="text" placeholder="Search users…" autocomplete="off"/>
       </div>
-      <div id="peopleList" class="room-list">
-        <span class="muted-hint">Loading…</span>
-      </div>
+      <div id="peopleList" class="room-list"><span class="muted-hint">Loading…</span></div>
     </div>
 
     <!-- DMs tab -->
     <div id="tab-dms" class="sidebar-tab-content">
-      <div id="dmList" class="room-list">
-        <span class="muted-hint">No DMs yet.<br>Click a user to start.</span>
-      </div>
+      <div id="dmList" class="room-list"><span class="muted-hint">No DMs yet.<br>Click a user to start.</span></div>
     </div>
 
     <!-- Groups tab -->
     <div id="tab-groups" class="sidebar-tab-content">
-      <div id="groupList" class="room-list">
-        <span class="muted-hint">No groups yet.</span>
-      </div>
+      <div id="groupList" class="room-list"><span class="muted-hint">No groups yet.</span></div>
     </div>
-
   </aside>
 
   <!-- ─────────── CHAT AREA ─────────── -->
@@ -85,6 +82,8 @@
           <span id="onlineDot" class="online-dot"></span>
         </div>
         <div class="chat-header-actions">
+          <button id="searchMsgBtn" class="icon-btn" title="Search messages">🔍</button>
+          <button id="pinnedMsgBtn" class="icon-btn" title="Pinned messages">📌</button>
           <button id="membersBtn" class="icon-btn" title="View members" style="display:none;">👥</button>
           <button id="addMemberBtn" class="icon-btn" title="Add member to group" style="display:none;">👤＋</button>
           <button id="modToolsBtn" class="icon-btn" title="Moderator tools" style="display:none;">🛠</button>
@@ -95,7 +94,13 @@
       <div id="roomError" class="error-banner" style="display:none;"></div>
       <div id="modTools" class="mod-tools-bar" style="display:none;">🛡 Moderator – click any message for options.</div>
 
-      <!-- Members panel (slide in from right, inside chat window) -->
+      <!-- Search bar -->
+      <div id="searchBar" class="search-bar" style="display:none;">
+        <input id="searchInput" type="text" placeholder="Search messages in this room…" autocomplete="off"/>
+        <button id="searchClearBtn" class="icon-btn">✕</button>
+      </div>
+
+      <!-- Members panel (slide in from right) -->
       <div id="membersPanel" class="members-panel" style="display:none;">
         <div class="members-panel-header">
           <span>Members</span>
@@ -104,19 +109,78 @@
         <div id="membersPanelList" class="members-panel-list"></div>
       </div>
 
-      <div class="chat-body">
-      <div class="chat-body">
-      <div id="messages" class="messages-area"></div>
-
-      <div class="input-bar">
-        <button id="attachFileButton" class="icon-btn attach-btn" title="Attach file">📎</button>
-        <input id="messageInput" type="text" placeholder="Type a message…" autocomplete="off"/>
-        <button id="sendMessageButton" class="send-btn" title="Send">➤</button>
+      <!-- Pinned messages panel -->
+      <div id="pinnedPanel" class="members-panel" style="display:none;">
+        <div class="members-panel-header">
+          <span>📌 Pinned Messages</span>
+          <button id="closePinnedPanel" class="icon-btn">✕</button>
+        </div>
+        <div id="pinnedPanelList" class="members-panel-list"></div>
       </div>
-      <input type="file" id="fileInput" style="display:none;"/>
-      </div><!-- /.chat-body -->
+
+      <div class="chat-body">
+        <div id="messages" class="messages-area"></div>
+
+        <!-- Typing indicator -->
+        <div id="typingIndicator" class="typing-indicator" style="display:none;">
+          <span id="typingText"></span>
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+        </div>
+
+        <!-- Reply preview bar -->
+        <div id="replyBar" class="reply-bar" style="display:none;">
+          <div class="reply-bar-inner">
+            <span class="reply-label">↩ Replying to <strong id="replyToName"></strong>:</span>
+            <span id="replyToContent" class="reply-preview-text"></span>
+          </div>
+          <button id="cancelReply" class="icon-btn">✕</button>
+        </div>
+
+        <div class="input-bar">
+          <button id="attachFileButton" class="icon-btn attach-btn" title="Attach file">📎</button>
+          <input id="messageInput" type="text" placeholder="Type a message…" autocomplete="off"/>
+          <button id="emojiPickerBtn" class="icon-btn" title="Emoji">😊</button>
+          <button id="sendMessageButton" class="send-btn" title="Send">➤</button>
+        </div>
+        <input type="file" id="fileInput" style="display:none;"/>
+
+        <!-- Quick emoji picker -->
+        <div id="emojiPicker" class="emoji-picker" style="display:none;">
+          <div class="emoji-grid" id="emojiGrid"></div>
+        </div>
+      </div>
     </div>
   </main>
+</div>
+
+<!-- ══════════════  MESSAGE CONTEXT MENU  ══════════════ -->
+<div id="msgContextMenu" class="context-menu" style="display:none;">
+  <button class="ctx-item" id="ctxReply">↩ Reply</button>
+  <button class="ctx-item" id="ctxReact">😊 React</button>
+  <button class="ctx-item ctx-edit" id="ctxEdit" style="display:none;">✏️ Edit</button>
+  <button class="ctx-item" id="ctxPin">📌 Pin</button>
+  <button class="ctx-item ctx-delete" id="ctxDelete" style="display:none;">🗑 Delete</button>
+</div>
+
+<!-- Reaction picker for context menu -->
+<div id="reactionPicker" class="reaction-picker-popup" style="display:none;">
+  <span data-emoji="👍">👍</span><span data-emoji="❤️">❤️</span>
+  <span data-emoji="😂">😂</span><span data-emoji="😮">😮</span>
+  <span data-emoji="😢">😢</span><span data-emoji="😡">😡</span>
+  <span data-emoji="🔥">🔥</span><span data-emoji="🎉">🎉</span>
+  <span data-emoji="✅">✅</span><span data-emoji="👏">👏</span>
+</div>
+
+<!-- ══════════════  NOTIFICATIONS PANEL  ══════════════ -->
+<div id="notifPanel" class="notif-panel" style="display:none;">
+  <div class="notif-panel-header">
+    <span>🔔 Notifications</span>
+    <div style="display:flex;gap:6px;">
+      <button id="markAllReadBtn" class="btn-ghost btn-sm">Mark all read</button>
+      <button id="closeNotifPanel" class="icon-btn">✕</button>
+    </div>
+  </div>
+  <div id="notifList" class="notif-list"><div class="members-loading">Loading…</div></div>
 </div>
 
 <!-- ══════════════  NEW GROUP MODAL  ══════════════ -->
@@ -129,14 +193,13 @@
     <div class="modal-body">
       <label class="modal-label">Group Name</label>
       <input id="groupNameInput" type="text" class="modal-input" placeholder="e.g. Project Team"/>
-
-      <label class="modal-label" style="margin-top:14px;">Add Members <span class="muted-hint" style="display:inline;">(select from list)</span></label>
+      <label class="modal-label" style="margin-top:14px;">Description (optional)</label>
+      <input id="groupDescInput" type="text" class="modal-input" placeholder="What's this group about?"/>
+      <label class="modal-label" style="margin-top:14px;">Add Members</label>
       <div id="groupMemberSearch" class="modal-search">
         <input id="memberSearchInput" type="text" class="modal-input" placeholder="Search users…"/>
       </div>
-
       <div id="selectedMemberChips" class="chip-row"></div>
-
       <div id="memberPickList" class="member-pick-list"></div>
     </div>
     <div class="modal-footer">
@@ -155,7 +218,6 @@
       <button id="closeAddMemberModal" class="icon-btn">✕</button>
     </div>
     <div class="modal-body">
-      <label class="modal-label">Search &amp; Select User</label>
       <div class="modal-search">
         <input id="addMemberSearchInput" type="text" class="modal-input" placeholder="Search users…" autocomplete="off"/>
       </div>
@@ -171,8 +233,6 @@
 
 <script src="/script.js"></script>
 <script>
-  // Guard: verify session with server via HttpOnly cookie.
-  // No token in sessionStorage — the cookie handles everything.
   (async function guardChat() {
     const ok = await requireAuth();
     if (!ok) return;
@@ -181,6 +241,7 @@
       initTabs();
       loadPeopleList();
       loadMyRooms();
+      loadUnreadNotifCount();
     }
   })();
 </script>

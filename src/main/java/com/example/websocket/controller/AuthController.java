@@ -4,12 +4,15 @@ import com.example.websocket.JWT.JwtService;
 import com.example.websocket.JWT.JwtUtil;
 import com.example.websocket.JWT.WsTicketService;
 import com.example.websocket.config.LoginRateLimiter;
+import com.example.websocket.config.SocketConnectionHandler;
 import com.example.websocket.model.User;
 import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.AuthService;
+import com.example.websocket.service.UserProfileService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -34,11 +37,14 @@ public class AuthController {
     private final UserRepository userRepository;
     private final LoginRateLimiter rateLimiter;
     private final WsTicketService wsTicketService;
+    private final UserProfileService userProfileService;
+    private final SocketConnectionHandler socketHandler;
 
     public AuthController(AuthService authService, AuthenticationManager authenticationManager,
                           JwtUtil jwtUtil, JwtService jwtService,
                           UserRepository userRepository, LoginRateLimiter rateLimiter,
-                          WsTicketService wsTicketService) {
+                          WsTicketService wsTicketService, UserProfileService userProfileService,
+                          @Lazy SocketConnectionHandler socketHandler) {
         this.authService = authService;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
@@ -46,6 +52,8 @@ public class AuthController {
         this.userRepository = userRepository;
         this.rateLimiter = rateLimiter;
         this.wsTicketService = wsTicketService;
+        this.userProfileService = userProfileService;
+        this.socketHandler = socketHandler;
     }
 
     @PostMapping("/login")
@@ -90,21 +98,39 @@ public class AuthController {
                 .map(r -> "ROLE_" + r.getName())
                 .collect(Collectors.toList());
 
-        // ── HttpOnly cookie — token NEVER sent to JavaScript ──────────────
-        // This means it cannot be seen in sessionStorage, localStorage,
-        // or the Network tab response body. The browser sends it automatically
-        // on every request to this origin. JavaScript has zero access to it.
-        Cookie authCookie = new Cookie("AUTH_TOKEN", token);
-        authCookie.setHttpOnly(true);   // not accessible via JS at all
-        authCookie.setSecure(false);    // set true when behind HTTPS in production
-        authCookie.setPath("/");
-        authCookie.setMaxAge(2 * 60 * 60); // 2 hours, matches JWT expiry
-        response.addCookie(authCookie);
+        // Set user ONLINE on login (respects manual override) and broadcast actual status
+        try {
+            userProfileService.setOnline(dbUser.getUsername());  // no-op if manualStatusOverride=true
+            // Re-read to get the actual status (may still be AWAY/DND if manually set)
+            User freshUser = userRepository.findByUsername(dbUser.getUsername());
+            String actualStatus = (freshUser != null && freshUser.getStatus() != null)
+                    ? freshUser.getStatus().name() : "ONLINE";
+            socketHandler.broadcastPresenceGlobally(dbUser.getUsername(), actualStatus);
+        } catch (Exception ignored) {}
 
-        // Return ONLY username + roles — NO token in the response body
+        // ── HttpOnly cookie ───────────────────────────────────────────────
+        Cookie authCookie = new Cookie("AUTH_TOKEN", token);
+        authCookie.setHttpOnly(true);
+        authCookie.setSecure(false);   // set true behind HTTPS in production
+        authCookie.setPath("/");
+        authCookie.setMaxAge(2 * 60 * 60); // 2 hours
+        // SameSite=Lax ensures the cookie is sent on top-level navigations
+        // (e.g. clicking a link to /api/v1/dashboard) as well as AJAX calls.
+        response.addCookie(authCookie);
+        response.setHeader("Set-Cookie",
+            "AUTH_TOKEN=" + token
+            + "; Path=/"
+            + "; HttpOnly"
+            + "; SameSite=Lax"
+            + "; Max-Age=" + (2 * 60 * 60));
+
+        // Return username, roles, and profile fields — NO token in body
         Map<String, Object> resp = new HashMap<>();
-        resp.put("username", userDetails.getUsername());
-        resp.put("roles", roles);
+        resp.put("username",    userDetails.getUsername());
+        resp.put("roles",       roles);
+        resp.put("displayName", dbUser.getDisplayName() != null ? dbUser.getDisplayName() : dbUser.getUsername());
+        resp.put("avatarUrl",   dbUser.getAvatarUrl()   != null ? dbUser.getAvatarUrl()   : "");
+        resp.put("email",       dbUser.getEmail()       != null ? dbUser.getEmail()        : "");
         return ResponseEntity.ok(resp);
     }
 
@@ -158,9 +184,55 @@ public class AuthController {
             Map<String, Object> resp = new HashMap<>();
             resp.put("username", username);
             resp.put("roles", roles);
+            resp.put("displayName", dbUser.getDisplayName() != null ? dbUser.getDisplayName() : username);
+            resp.put("avatarUrl", dbUser.getAvatarUrl() != null ? dbUser.getAvatarUrl() : "");
+            resp.put("bio", dbUser.getBio() != null ? dbUser.getBio() : "");
+            resp.put("status", dbUser.getStatus() != null ? dbUser.getStatus().name() : "ONLINE");
+            resp.put("emailVerified", dbUser.isEmailVerified());
+            resp.put("email", dbUser.getEmail() != null ? dbUser.getEmail() : "");
+            resp.put("phone", dbUser.getPhone() != null ? dbUser.getPhone() : "");
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
+        }
+    }
+
+    @GetMapping("/verify-email")
+    public ResponseEntity<?> verifyEmail(@RequestParam String token) {
+        return authService.verifyEmail(token);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> body) {
+        String email = body.get("email");
+        if (email == null || email.isBlank()) return ResponseEntity.badRequest().body(Map.of("error", "Email is required."));
+        return authService.requestPasswordReset(email.trim().toLowerCase());
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> body) {
+        String token    = body.get("token");
+        String password = body.get("password");
+        if (token == null || token.isBlank()) return ResponseEntity.badRequest().body(Map.of("error", "Token is required."));
+        if (password == null || password.isBlank()) return ResponseEntity.badRequest().body(Map.of("error", "Password is required."));
+        return authService.resetPassword(token, password);
+    }
+
+    @PutMapping("/update-profile")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> updateProfile(@RequestBody Map<String, String> body, HttpServletRequest request) {
+        String token = jwtService.extractToken(request);
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
+        String username = jwtUtil.extractUsername(token);
+        try {
+            com.example.websocket.model.UserStatus status = null;
+            if (body.get("status") != null) {
+                try { status = com.example.websocket.model.UserStatus.valueOf(body.get("status").toUpperCase()); } catch (Exception ignored) {}
+            }
+            var profile = userProfileService.updateProfile(username, body.get("displayName"), body.get("bio"), body.get("avatarUrl"), body.get("phone"), status);
+            return ResponseEntity.ok(profile);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -168,9 +240,26 @@ public class AuthController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response) {
         String token = jwtService.extractToken(request);
+        String username = null;
         if (token != null) {
+            try { username = jwtUtil.extractUsername(token); } catch (Exception ignored) {}
             jwtService.invalidateToken(token); // blacklist the token
         }
+
+        // On explicit logout, force OFFLINE and clear manual override
+        if (username != null) {
+            try {
+                User u = userRepository.findByUsername(username);
+                if (u != null) {
+                    u.setManualStatusOverride(false);
+                    u.setStatus(com.example.websocket.model.UserStatus.OFFLINE);
+                    u.setLastSeen(java.time.LocalDateTime.now());
+                    userRepository.save(u);
+                }
+                socketHandler.broadcastPresenceGlobally(username, "OFFLINE");
+            } catch (Exception ignored) {}
+        }
+
         // Clear the auth cookie
         Cookie authCookie = new Cookie("AUTH_TOKEN", "");
         authCookie.setHttpOnly(true);
@@ -227,25 +316,7 @@ public class AuthController {
     // ── Helpers ───────────────────────────────────────────────────────
 
     private String validatePasswordStrength(String password) {
-        if (password == null || password.length() < 8) {
-            return "Password must be at least 8 characters.";
-        }
-        if (password.length() > 128) {
-            return "Password must not exceed 128 characters.";
-        }
-        if (!password.matches(".*[A-Z].*")) {
-            return "Password must contain at least one uppercase letter.";
-        }
-        if (!password.matches(".*[a-z].*")) {
-            return "Password must contain at least one lowercase letter.";
-        }
-        if (!password.matches(".*\\d.*")) {
-            return "Password must contain at least one digit.";
-        }
-        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?`~].*")) {
-            return "Password must contain at least one special character (!@#$%^&* etc.).";
-        }
-        return null; // valid
+        return authService.validatePasswordStrength(password);
     }
 
     private String getClientIp(HttpServletRequest request) {

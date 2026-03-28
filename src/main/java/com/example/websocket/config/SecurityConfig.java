@@ -39,18 +39,25 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/auth/login",
                     "/api/auth/register",
+                    "/api/auth/verify-email",
+                    "/api/auth/forgot-password",
+                    "/api/auth/reset-password",
                     // Versioned page routes — public
                     "/api/v1/", "/api/v1",
                     "/api/v1/login", "/api/v1/register",
+                    "/api/v1/forgot-password", "/api/v1/reset-password",
                     // Raw .html kept for internal forwards only
                     "/index.html", "/login.html", "/register.html",
+                    "/forgot-password.html", "/reset-password.html",
                     "/*.css", "/*.js"
                 ).permitAll()
                 // WebSocket — auth enforced in HandshakeInterceptor
                 .requestMatchers("/ws/**").permitAll()
                 // Protected page routes — must be authenticated
                 .requestMatchers("/api/v1/chat", "/api/v1/dashboard",
-                                  "/chat.html",  "/dashboard.html").authenticated()
+                                  "/api/v1/profile",
+                                  "/chat.html", "/dashboard.html",
+                                  "/profile.html").authenticated()
                 // File uploads: any authenticated user
                 .requestMatchers("/api/files/**").hasAnyRole("USER", "ADMIN", "MODERATOR")
                 // Admin REST API only
@@ -59,7 +66,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/moderator/**").hasAnyRole("ADMIN", "MODERATOR")
                 // Authenticated REST endpoints
                 .requestMatchers("/api/auth/me", "/api/auth/change-password",
-                                  "/api/auth/logout", "/api/auth/ws-ticket").authenticated()
+                                  "/api/auth/logout", "/api/auth/ws-ticket",
+                                  "/api/auth/update-profile").authenticated()
                 // Everything else needs auth
                 .anyRequest().authenticated()
             )

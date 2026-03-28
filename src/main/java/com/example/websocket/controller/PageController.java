@@ -38,4 +38,19 @@ public class PageController {
     public String dashboard() {
         return "forward:/dashboard.html";
     }
+
+    @GetMapping("/forgot-password")
+    public String forgotPassword() {
+        return "forward:/forgot-password.html";
+    }
+
+    @GetMapping("/reset-password")
+    public String resetPassword() {
+        return "forward:/reset-password.html";
+    }
+
+    @GetMapping("/profile")
+    public String profile() {
+        return "forward:/profile.html";
+    }
 }
