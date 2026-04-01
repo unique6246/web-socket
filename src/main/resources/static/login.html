@@ -8,6 +8,16 @@
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <title>Login – ChatApp</title>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        .sso-divider { text-align:center; color:#94a3b8; font-size:13px; margin:16px 0; position:relative; }
+        .sso-divider::before,.sso-divider::after { content:''; display:inline-block; width:38%; height:1px; background:#e2e8f0; vertical-align:middle; margin:0 8px; }
+        .btn-sso { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:11px 16px; border-radius:8px; border:1.5px solid #e2e8f0; background:#fff; color:#1e293b; font-size:15px; font-weight:500; cursor:pointer; margin-bottom:10px; text-decoration:none; transition:border-color .2s,background .2s; }
+        .btn-sso:hover { border-color:#4f46e5; background:#f8f7ff; }
+        .btn-sso svg { flex-shrink:0; }
+        .sso-section { margin-top:4px; }
+        .resend-link { font-size:13px; color:#64748b; text-align:center; margin-top:12px; }
+        .resend-link a { color:#4f46e5; cursor:pointer; text-decoration:underline; }
+    </style>
 </head>
 <body>
 <div class="auth-wrap">
@@ -18,6 +28,22 @@
 
         <div id="loginError" class="error-msg" style="display:none;"></div>
         <div id="loginSuccess" class="success-msg" style="display:none;"></div>
+
+        <!-- SSO Buttons -->
+        <div class="sso-section">
+            <a href="/oauth2/authorization/google" class="btn-sso">
+                <!-- Google icon -->
+                <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+                Continue with Google
+            </a>
+            <a href="/oauth2/authorization/github" class="btn-sso">
+                <!-- GitHub icon -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="#1e293b"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                Continue with GitHub
+            </a>
+        </div>
+
+        <div class="sso-divider"><span>or sign in with username</span></div>
 
         <form id="loginForm" class="auth-form">
             <div class="form-group">
@@ -40,14 +66,26 @@
             <button type="submit" class="btn-auth" id="loginBtn">Sign In</button>
         </form>
 
+        <div class="resend-link">
+            Didn't get a verification email? <a onclick="showResend()">Resend it</a>
+        </div>
+
+        <div id="resendSection" style="display:none; margin-top:12px;">
+            <div id="resendMsg" class="success-msg" style="display:none;"></div>
+            <div id="resendErr" class="error-msg" style="display:none;"></div>
+            <div style="display:flex;gap:8px;">
+                <input type="email" id="resendEmail" placeholder="your@email.com" style="flex:1;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;" maxlength="100">
+                <button onclick="resendVerification()" style="padding:9px 16px;background:#4f46e5;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Send</button>
+            </div>
+        </div>
+
         <div class="auth-divider"><span>or</span></div>
         <p class="auth-switch">Don't have an account? <a href="/api/v1/register">Create one</a></p>
     </div>
 </div>
 <script src="/script.js"></script>
 <script>
-    // Check if already logged in by calling the server (uses HttpOnly cookie).
-    // We never check sessionStorage for a token — it no longer exists there.
+    // Check if already logged in
     (async function checkExistingSession() {
         try {
             const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -61,6 +99,46 @@
             }
         } catch(e) { /* network error — stay on login page */ }
     })();
+
+    // Show OAuth error messages
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("verified") === "true") {
+        const el = document.getElementById("loginSuccess");
+        el.textContent = "✅ Email verified! Your account is now active. You can sign in below.";
+        el.style.display = "block";
+    } else if (params.get("error") === "oauth_failed") {
+        const el = document.getElementById("loginError");
+        el.textContent = "SSO sign-in failed. Please try again or use username/password.";
+        el.style.display = "block";
+    } else if (params.get("error") === "oauth_no_email") {
+        const el = document.getElementById("loginError");
+        el.textContent = "Your OAuth provider did not share an email address. Please use username/password login.";
+        el.style.display = "block";
+    }
+
+    function showResend() {
+        const sec = document.getElementById("resendSection");
+        sec.style.display = sec.style.display === "none" ? "block" : "none";
+    }
+
+    async function resendVerification() {
+        const email = document.getElementById("resendEmail").value.trim();
+        const msgEl = document.getElementById("resendMsg");
+        const errEl = document.getElementById("resendErr");
+        msgEl.style.display = "none";
+        errEl.style.display = "none";
+        if (!email) { errEl.textContent = "Please enter your email."; errEl.style.display = "block"; return; }
+        try {
+            const res = await fetch("/api/auth/resend-verification", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            if (res.ok) { msgEl.textContent = data.message; msgEl.style.display = "block"; }
+            else { errEl.textContent = data.error || "Failed to send."; errEl.style.display = "block"; }
+        } catch(e) { errEl.textContent = "Network error."; errEl.style.display = "block"; }
+    }
 </script>
 </body>
 </html>

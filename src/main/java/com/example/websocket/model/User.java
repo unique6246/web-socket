@@ -70,6 +70,19 @@ public class User implements Serializable {
     @Column(nullable = false)
     private boolean emailVerified = false;
 
+    /**
+     * OAuth2 provider name (e.g. "google", "github").
+     * Null for users who registered via username/password.
+     */
+    @Column(length = 30)
+    private String provider;
+
+    /**
+     * The unique user-ID returned by the OAuth2 provider (subject claim).
+     */
+    @Column(length = 255)
+    private String providerUserId;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

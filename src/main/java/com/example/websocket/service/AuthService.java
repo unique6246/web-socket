@@ -95,6 +95,8 @@ public class AuthService implements UserDetailsService {
         User user = evt.getUser();
         user.setEmailVerified(true);
         userRepository.save(user);
+        // Send welcome email now that the address is confirmed
+        emailService.sendWelcomeEmail(user);
         return ResponseEntity.ok(Map.of("message", "Email verified successfully. You can now log in."));
     }
 

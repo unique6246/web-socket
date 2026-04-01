@@ -198,8 +198,19 @@ public class AuthController {
     }
 
     @GetMapping("/verify-email")
-    public ResponseEntity<?> verifyEmail(@RequestParam String token) {
-        return authService.verifyEmail(token);
+    public void verifyEmail(@RequestParam String token,
+                            HttpServletResponse response) throws java.io.IOException {
+        ResponseEntity<?> result = authService.verifyEmail(token);
+        if (result.getStatusCode().is2xxSuccessful()) {
+            response.sendRedirect("/api/v1/login?verified=true");
+        } else {
+            // Extract error message for the redirect
+            String msg = "verification_failed";
+            if (result.getBody() instanceof java.util.Map<?,?> map && map.containsKey("error")) {
+                msg = java.net.URLEncoder.encode(map.get("error").toString(), "UTF-8");
+            }
+            response.sendRedirect("/api/v1/login?error=" + msg);
+        }
     }
 
     @PostMapping("/forgot-password")
