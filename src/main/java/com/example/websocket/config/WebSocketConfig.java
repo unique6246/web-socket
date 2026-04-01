@@ -69,7 +69,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
                                                @Nullable WebSocketHandler wsHandler,
                                                Exception ex) {}
                 })
-                .setAllowedOriginPatterns("http://localhost:*", "https://localhost:*");
+                .setAllowedOriginPatterns("*");
     }
 
     private Map<String, String> parseQueryParams(String query) {

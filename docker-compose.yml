@@ -1,16 +1,58 @@
 # ═══════════════════════════════════════════════════════════════
 #  ChatApp – Docker Compose
-#  Services:  app  |  mysql
+#  Services:  app  |  mysql  |  zookeeper  |  kafka  |  kafka-ui
 #  Cloudinary is external (cloud) — no container needed.
+#
+#  Architecture (per the Kafka + WebSocket design):
+#    User → app → Kafka → app (fan-out via ws-broadcast consumer)
+#    Kafka also feeds:  chat-persistence (DB write)
+#                       push-notifications (stub)
 #
 #  Usage:
 #    docker compose up --build        # first time
 #    docker compose up -d             # detached
 #    docker compose down              # stop & remove containers
-#    docker compose down -v           # also remove volumes (wipes DB)
+#    docker compose down -v           # also remove volumes (wipes DB + Kafka)
 # ═══════════════════════════════════════════════════════════════
 
 services:
+
+  # ── Zookeeper (required by Kafka) ─────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: chatapp-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - chatapp-net
+
+  # ── Kafka Broker ──────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: chatapp-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"           # expose for local Kafka tools / testing
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - chatapp-net
 
   # ── MySQL ────────────────────────────────────────────────────
   mysql:
@@ -35,7 +77,56 @@ services:
     networks:
       - chatapp-net
 
-  # ── Spring Boot App ───────────────────────────────────────────
+  # ── Kafka UI (Provectus) ──────────────────────────────────────
+  # Web dashboard to monitor topics, messages, partitions,
+  # consumer groups and offsets.
+  # Access at: http://localhost:8090
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: chatapp-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME:            local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER:       zookeeper:2181
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - chatapp-net
+
+  # ── Redis (session store, presence, token blacklist) ─────────
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatapp-net
+
+  # ── MailHog (local SMTP for dev email testing) ────────────────
+  # SMTP:  localhost:1025  |  Web UI: http://localhost:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: chatapp-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"           # SMTP
+      - "8025:8025"           # Web UI
+    networks:
+      - chatapp-net
+
+  # ── Spring Boot App — Server Instance 1 ───────────────────────
   app:
     build:
       context: .
@@ -43,21 +134,39 @@ services:
     container_name: chatapp-app
     restart: unless-stopped
     ports:
-      - "${SERVER_PORT:-8080}:8080"
+      - "8085:8080"
     env_file:
-      - .env                  # load all variables from .env
+      - .env
     environment:
-      # Override localhost references with Docker service names
-      DB_HOST:    mysql
+      DB_HOST:      mysql
+      KAFKA_HOST:   kafka
+      KAFKA_PORT:   9092
+      REDIS_HOST:   redis
+      REDIS_PORT:   6379
+      SMTP_HOST:    mailhog
+      SMTP_PORT:    1025
+      SMTP_AUTH:    "false"
+      SMTP_STARTTLS: "false"
+      EMAIL_ENABLED: "true"
+      APP_BASE_URL:  "http://localhost:8085"
+      INSTANCE_ID:  server-1
     depends_on:
       mysql:
-        condition: service_healthy   # wait until MySQL is ready
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - chatapp-net
 
 # ── Volumes ───────────────────────────────────────────────────
 volumes:
   mysql_data:
+    driver: local
+  kafka_data:
+    driver: local
+  redis_data:
     driver: local
 
 # ── Network ───────────────────────────────────────────────────

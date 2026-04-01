@@ -10,15 +10,39 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="container">
-    <h2>Welcome Back</h2>
-    <div id="loginError" class="error-msg" style="display:none;"></div>
-    <form id="loginForm">
-        <input type="text" id="username" placeholder="Username" required autocomplete="username" maxlength="50">
-        <input type="password" id="password" placeholder="Password" required autocomplete="current-password" maxlength="128">
-        <button type="submit">Login</button>
-    </form>
-    <p>Don't have an account? <a href="/api/v1/register">Register here</a></p>
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="auth-logo">💬</div>
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-sub">Sign in to continue to ChatApp</p>
+
+        <div id="loginError" class="error-msg" style="display:none;"></div>
+        <div id="loginSuccess" class="success-msg" style="display:none;"></div>
+
+        <form id="loginForm" class="auth-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" placeholder="Enter username" required autocomplete="username" maxlength="50">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="pw-wrap">
+                    <input type="password" id="password" name="password" placeholder="Enter password" required autocomplete="current-password" maxlength="128">
+                    <button type="button" class="pw-toggle" onclick="togglePw('password', this)" tabindex="-1">👁</button>
+                </div>
+            </div>
+            <div class="form-row-between">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="rememberMe"> Remember me
+                </label>
+                <a href="/api/v1/forgot-password" class="link-sm">Forgot password?</a>
+            </div>
+            <button type="submit" class="btn-auth" id="loginBtn">Sign In</button>
+        </form>
+
+        <div class="auth-divider"><span>or</span></div>
+        <p class="auth-switch">Don't have an account? <a href="/api/v1/register">Create one</a></p>
+    </div>
 </div>
 <script src="/script.js"></script>
 <script>
@@ -29,11 +53,12 @@
             const res = await fetch("/api/auth/me", { credentials: "include" });
             if (res.ok) {
                 const data = await res.json();
-                sessionStorage.setItem("roles",    JSON.stringify(data.roles || []));
-                sessionStorage.setItem("username", data.username);
+                sessionStorage.setItem("roles",       JSON.stringify(data.roles || []));
+                sessionStorage.setItem("username",    data.username);
+                sessionStorage.setItem("displayName", data.displayName || data.username);
+                sessionStorage.setItem("avatarUrl",   data.avatarUrl || "");
                 window.location.href = (data.roles || []).includes("ROLE_ADMIN") ? "/api/v1/dashboard" : "/api/v1/chat";
             }
-            // If not ok — cookie absent or expired — stay on login page (no action needed)
         } catch(e) { /* network error — stay on login page */ }
     })();
 </script>

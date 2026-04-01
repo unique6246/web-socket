@@ -1,23 +1,20 @@
 package com.example.websocket.controller;
 
-import com.example.websocket.model.ChatRoom;
 import com.example.websocket.service.ChatRoomService;
 import com.example.websocket.JWT.JwtService;
 import com.example.websocket.JWT.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
 public class RoomController {
-
 
     private final ChatRoomService chatRoomService;
     private final JwtService jwtService;
@@ -31,27 +28,30 @@ public class RoomController {
 
     @GetMapping("/api/user/rooms")
     public ResponseEntity<List<Map<String, String>>> rooms(HttpServletRequest request) {
-        String token = jwtService.extractToken(request);
-        String username = jwtUtil.extractUsername(token);
-
-        // Fetch the list of room names
-        List<String> roomNames = chatRoomService.getRoomsByUserName(username);
-
-        // Convert the list of room names into a list of maps
-        List<Map<String, String>> roomObjects = roomNames.stream()
-                .map(roomName -> {
-                    Map<String, String> roomMap = new HashMap<>();
-                    roomMap.put("roomName", roomName);
-                    return roomMap;
-                })
-                .collect(Collectors.toList());
-
-        return ResponseEntity.ok(roomObjects);
+        String username = jwtUtil.extractUsername(jwtService.extractToken(request));
+        return ResponseEntity.ok(
+            chatRoomService.getRoomsByUserName(username).stream()
+                .map(name -> Map.of("roomName", name))
+                .collect(Collectors.toList())
+        );
     }
 
+    /** Search rooms — returns safe DTOs, no lazy collections */
     @GetMapping("/api/rooms/search")
-    public ResponseEntity<List<ChatRoom>> searchRooms(@RequestParam String query, HttpServletRequest request) {
-        return ResponseEntity.ok(chatRoomService.searchRoomsByName(query));
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> searchRooms(@RequestParam String query) {
+        List<Map<String, Object>> result = chatRoomService.searchRoomsByName(query).stream()
+                .map(r -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id",          r.getId());
+                    m.put("roomName",    r.getRoomName());
+                    m.put("type",        r.getType() != null ? r.getType() : "GROUP");
+                    m.put("description", r.getDescription() != null ? r.getDescription() : "");
+                    m.put("memberCount", r.getChatRoomUsers() != null ? r.getChatRoomUsers().size() : 0);
+                    return m;
+                })
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(result);
     }
 
 

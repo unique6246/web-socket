@@ -19,11 +19,14 @@
 <body>
 <nav class="navbar navbar-dark bg-dark px-3">
   <span class="navbar-brand">🛡 Admin Dashboard</span>
-  <div>
-    <a href="/api/v1/chat" class="btn btn-outline-light btn-sm mr-2">← Chat</a>
+  <div class="d-flex align-items-center" style="gap:10px;">
+    <span id="navUsername" class="text-light" style="font-size:.9em;opacity:.8;"></span>
+    <a href="/api/v1/chat" class="btn btn-outline-light btn-sm">← Chat</a>
     <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
   </div>
 </nav>
+
+<div id="globalError" class="alert alert-danger mx-3 mt-2" style="display:none;"></div>
 
 <div class="container mt-4">
 
@@ -93,31 +96,45 @@
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (!res.ok) {
-        sessionStorage.removeItem("username");
-        sessionStorage.removeItem("roles");
+        // 401 = not logged in — redirect to login
+        sessionStorage.clear();
         window.location.href = "/api/v1/login";
         return;
       }
       const data = await res.json();
       const roles = data.roles || [];
-      sessionStorage.setItem("roles",    JSON.stringify(roles));
-      sessionStorage.setItem("username", data.username);
+
+      // Persist full profile info
+      sessionStorage.setItem("roles",       JSON.stringify(roles));
+      sessionStorage.setItem("username",    data.username);
+      sessionStorage.setItem("displayName", data.displayName || data.username);
+      sessionStorage.setItem("avatarUrl",   data.avatarUrl   || "");
 
       if (!roles.includes("ROLE_ADMIN")) {
-        alert("Access denied. Admin only.");
-        window.location.href = "/api/v1/login";
+        // Logged in but not admin — show access-denied, don't loop to login
+        document.body.innerHTML =
+          `<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;font-family:sans-serif;gap:16px;">
+             <h2>&#x26D4; Access Denied</h2>
+             <p>You need the <strong>ADMIN</strong> role to view this page.</p>
+             <a href="/api/v1/chat" style="color:#4f46e5;">&#8592; Back to Chat</a>
+           </div>`;
         return;
       }
+
+      // Show the logged-in username in the navbar
+      const navUser = document.getElementById("navUsername");
+      if (navUser) navUser.textContent = data.displayName || data.username;
+
+      // Boot the dashboard
       if (document.readyState !== "loading") {
         fetchStats(); fetchUsers(); fetchChatRooms();
       } else {
-        document.addEventListener("DOMContentLoaded", function () {
+        document.addEventListener("DOMContentLoaded", () => {
           fetchStats(); fetchUsers(); fetchChatRooms();
         });
       }
     } catch (e) {
-      sessionStorage.removeItem("username");
-      sessionStorage.removeItem("roles");
+      sessionStorage.clear();
       window.location.href = "/api/v1/login";
     }
   })();
@@ -135,13 +152,20 @@
   }
 
   async function authFetch(url, options = {}) {
-    // No Authorization header — cookie is sent automatically
     options.credentials = "include";
     options.headers = { ...options.headers, "Content-Type": "application/json" };
     const res = await fetch(url, options);
-    if (res.status === 401 || res.status === 403) {
-      alert("Session expired or unauthorized. Redirecting to login.");
+    if (res.status === 401) {
+      // Session expired — go to login
+      sessionStorage.clear();
       window.location.href = "/api/v1/login";
+      return null;
+    }
+    if (res.status === 403) {
+      // Authenticated but not authorized — show error inline, don't redirect
+      const errBox = document.getElementById("globalError");
+      if (errBox) { errBox.textContent = "⛔ Permission denied for: " + url; errBox.style.display = "block"; }
+      else alert("Access denied: " + url);
       return null;
     }
     return res;
@@ -256,7 +280,7 @@
     const tbody = document.querySelector("#chatRoomsTable tbody");
     tbody.innerHTML = "";
     rooms.forEach(room => {
-      const memberCount = room.chatRoomUsers ? room.chatRoomUsers.length : "–";
+      const memberCount = room.memberCount ?? "–";
       tbody.insertAdjacentHTML("beforeend", `
         <tr>
           <td>${room.id}</td>
