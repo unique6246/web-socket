@@ -234,6 +234,8 @@ public class AuthController {
             resp.put("emailVerified", dbUser.isEmailVerified());
             resp.put("email", dbUser.getEmail() != null ? dbUser.getEmail() : "");
             resp.put("phone", dbUser.getPhone() != null ? dbUser.getPhone() : "");
+            resp.put("passwordSet", dbUser.isPasswordSet());
+            resp.put("provider", dbUser.getProvider() != null ? dbUser.getProvider() : "");
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
@@ -365,6 +367,34 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("error", "New password must differ from current password."));
         }
         return authService.changePassword(username, oldPassword, newPassword);
+    }
+
+    /**
+     * Allows OAuth users (who have no password yet) to set a password for the first time.
+     * After this, they can also log in with username + password.
+     */
+    @PostMapping("/set-password")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> setPassword(@RequestBody Map<String, String> requestBody,
+                                          HttpServletRequest request) {
+        String token = jwtService.extractToken(request);
+        if (token == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
+        }
+        String username = jwtUtil.extractUsername(token);
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(404).body(Map.of("error", "User not found"));
+        }
+        if (user.isPasswordSet()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Password already set. Use 'Change Password' instead."));
+        }
+        String newPassword = requestBody.get("newPassword");
+        String pwdError = validatePasswordStrength(newPassword);
+        if (pwdError != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+        }
+        return authService.setInitialPassword(username, newPassword);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
