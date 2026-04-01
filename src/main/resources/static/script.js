@@ -128,7 +128,7 @@ function makeAvatarEl(username, avatarUrl, size) {
 //  Login / Register
 // ──────────────────────────────────────────────
 function handleLogin(e) {
-    e.preventDefault(); hideBanner("loginError");
+    e.preventDefault(); hideBanner("loginError"); hideBanner("loginSuccess");
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
     if (!username) return showBanner("loginError", "Username is required.");
@@ -136,7 +136,13 @@ function handleLogin(e) {
     const btn = e.target.querySelector("button[type='submit']");
     if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
     fetch("/api/auth/login", { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, password }) })
-    .then(r => { if (r.status === 429) return r.json().then(d => { throw new Error(d.error || "Too many attempts. Try later."); }); if (!r.ok) return r.json().then(d => { throw new Error(d.error || "Login failed"); }); return r.json(); })
+    .then(r => {
+        if (r.status === 429) return r.json().then(d => { throw Object.assign(new Error(d.error || "Too many requests from this network. Try later."), { status: 429 }); });
+        if (r.status === 423) return r.json().then(d => { throw Object.assign(new Error(d.error || "Account locked. Reset your password."), { status: 423 }); });
+        if (r.status === 403) return r.json().then(d => { throw Object.assign(new Error(d.error || "Access denied."), { status: 403, unverified: d.unverified }); });
+        if (!r.ok) return r.json().then(d => { throw Object.assign(new Error(d.error || "Login failed"), { attemptsRemaining: d.attemptsRemaining }); });
+        return r.json();
+    })
     .then(data => {
         sessionStorage.setItem("username",    data.username);
         sessionStorage.setItem("roles",       JSON.stringify(data.roles || []));
@@ -144,7 +150,21 @@ function handleLogin(e) {
         sessionStorage.setItem("avatarUrl",   data.avatarUrl || "");
         window.location.href = (data.roles || []).includes("ROLE_ADMIN") ? "/api/v1/dashboard" : "/api/v1/chat";
     })
-    .catch(err => { showBanner("loginError", err.message); if (btn) { btn.disabled = false; btn.textContent = "Sign In"; } });
+    .catch(err => {
+        let msg = err.message;
+        if (err.attemptsRemaining !== undefined) {
+            msg += ` (${err.attemptsRemaining} attempt${err.attemptsRemaining !== 1 ? 's' : ''} remaining before lockout)`;
+        }
+        if (err.unverified) {
+            msg += ' <a href="#" onclick="showResend()" style="color:#4f46e5;text-decoration:underline;">Resend verification email</a>';
+            const errEl = document.getElementById("loginError");
+            if (errEl) { errEl.innerHTML = msg; errEl.style.display = "block"; }
+            if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+            return;
+        }
+        showBanner("loginError", msg);
+        if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+    });
 }
 
 function handleRegister(e) {

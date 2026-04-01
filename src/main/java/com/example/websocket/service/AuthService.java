@@ -21,6 +21,9 @@ import java.util.stream.Collectors;
 @Service
 public class AuthService implements UserDetailsService {
 
+    private static final int    MAX_ATTEMPTS   = 5;
+    private static final long   LOCK_MINUTES   = 15;
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -175,5 +178,57 @@ public class AuthService implements UserDetailsService {
         if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?`~].*"))
             return "Password must contain at least one special character.";
         return null;
+    }
+
+    /**
+     * Record a failed login for this user account.
+     * Locks the account after MAX_ATTEMPTS and sends a lock email.
+     */
+    @Transactional
+    public void recordUserFailure(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return;
+        int attempts = user.getFailedLoginAttempts() + 1;
+        user.setFailedLoginAttempts(attempts);
+        if (attempts >= MAX_ATTEMPTS) {
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(LOCK_MINUTES));
+            userRepository.save(user);
+            emailService.sendAccountLockedEmail(user);
+        } else {
+            userRepository.save(user);
+        }
+    }
+
+    /** Clear failed attempts on successful login */
+    @Transactional
+    public void recordUserSuccess(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return;
+        if (user.getFailedLoginAttempts() > 0 || user.getLockedUntil() != null) {
+            user.setFailedLoginAttempts(0);
+            user.setLockedUntil(null);
+            userRepository.save(user);
+        }
+    }
+
+    /** Returns true if this user account is currently locked */
+    public boolean isUserLocked(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return false;
+        if (user.getLockedUntil() == null) return false;
+        if (LocalDateTime.now().isBefore(user.getLockedUntil())) return true;
+        // Lock expired — clear it
+        user.setLockedUntil(null);
+        user.setFailedLoginAttempts(0);
+        userRepository.save(user);
+        return false;
+    }
+
+    /** Seconds remaining until the account lock expires */
+    public long getUserLockedSeconds(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null || user.getLockedUntil() == null) return 0;
+        long secs = java.time.Duration.between(LocalDateTime.now(), user.getLockedUntil()).getSeconds();
+        return Math.max(0, secs);
     }
 }

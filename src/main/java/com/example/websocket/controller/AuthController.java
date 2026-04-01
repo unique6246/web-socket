@@ -8,6 +8,7 @@ import com.example.websocket.config.SocketConnectionHandler;
 import com.example.websocket.model.User;
 import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.AuthService;
+import com.example.websocket.service.EmailService;
 import com.example.websocket.service.UserProfileService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,12 +40,14 @@ public class AuthController {
     private final WsTicketService wsTicketService;
     private final UserProfileService userProfileService;
     private final SocketConnectionHandler socketHandler;
+    private final EmailService emailService;
 
     public AuthController(AuthService authService, AuthenticationManager authenticationManager,
                           JwtUtil jwtUtil, JwtService jwtService,
                           UserRepository userRepository, LoginRateLimiter rateLimiter,
                           WsTicketService wsTicketService, UserProfileService userProfileService,
-                          @Lazy SocketConnectionHandler socketHandler) {
+                          @Lazy SocketConnectionHandler socketHandler,
+                          EmailService emailService) {
         this.authService = authService;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
@@ -54,6 +57,7 @@ public class AuthController {
         this.wsTicketService = wsTicketService;
         this.userProfileService = userProfileService;
         this.socketHandler = socketHandler;
+        this.emailService = emailService;
     }
 
     @PostMapping("/login")
@@ -62,15 +66,7 @@ public class AuthController {
                                                         HttpServletResponse response) {
         String ip = getClientIp(request);
 
-        // Rate limit check
-        if (rateLimiter.isBlocked(ip)) {
-            long retryAfter = rateLimiter.getRetryAfterSeconds(ip);
-            response.setHeader("Retry-After", String.valueOf(retryAfter));
-            return ResponseEntity.status(429).body(
-                Map.of("error", "Too many failed login attempts. Try again in " + retryAfter + " seconds."));
-        }
-
-        // Input validation
+        // Input validation first
         if (authRequest.getUsername() == null || authRequest.getUsername().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Username is required."));
         }
@@ -78,44 +74,91 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("error", "Password is required."));
         }
 
+        String username = authRequest.getUsername().trim();
+
+        // ── 1. Per-user account lockout (DB-persisted, survives restarts) ──
+        if (authService.isUserLocked(username)) {
+            long retryAfter = authService.getUserLockedSeconds(username);
+            response.setHeader("Retry-After", String.valueOf(retryAfter));
+            return ResponseEntity.status(423).body(
+                Map.of("error", "Account locked due to too many failed attempts. Try again in "
+                    + (retryAfter / 60) + " min " + (retryAfter % 60) + " sec, or reset your password."));
+        }
+
+        // ── 2. IP-based rate limit (secondary protection against distributed attacks) ──
+        if (rateLimiter.isBlocked(ip)) {
+            long retryAfter = rateLimiter.getRetryAfterSeconds(ip);
+            response.setHeader("Retry-After", String.valueOf(retryAfter));
+            return ResponseEntity.status(429).body(
+                Map.of("error", "Too many requests from this network. Try again in " + retryAfter + " seconds."));
+        }
+
+        // ── 3. Authenticate ───────────────────────────────────────────────
         try {
             authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                    authRequest.getUsername().trim(), authRequest.getPassword()));
+                new UsernamePasswordAuthenticationToken(username, authRequest.getPassword()));
         } catch (AuthenticationException e) {
+            // Record failure on both IP limiter and per-user counter
             rateLimiter.recordFailure(ip);
+            authService.recordUserFailure(username);
+            // Give a hint about how many attempts remain (if user exists)
+            User maybeUser = userRepository.findByUsername(username);
+            if (maybeUser != null) {
+                int remaining = Math.max(0, 5 - maybeUser.getFailedLoginAttempts());
+                if (remaining == 0) {
+                    return ResponseEntity.status(423).body(Map.of("error",
+                        "Account locked for 15 minutes. A notification has been sent to your email."));
+                }
+                return ResponseEntity.status(401).body(Map.of(
+                    "error", "Invalid username or password.",
+                    "attemptsRemaining", remaining));
+            }
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
 
+        // ── 4. Load user from DB ──────────────────────────────────────────
+        User dbUser = userRepository.findByUsername(username);
+
+        // ── 5. Email verification check ──────────────────────────────────
+        if (dbUser.getEmail() != null && !dbUser.isEmailVerified()) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Please verify your email before logging in.",
+                "unverified", true));
+        }
+
+        // ── 6. Clear failure counters on success ─────────────────────────
         rateLimiter.recordSuccess(ip);
+        authService.recordUserSuccess(username);
 
-        final UserDetails userDetails = authService.loadUserByUsername(authRequest.getUsername().trim());
+        // ── 7. Generate JWT ───────────────────────────────────────────────
+        final UserDetails userDetails = authService.loadUserByUsername(username);
         String token = jwtUtil.generateToken(userDetails);
-
-        // Load fresh roles from DB
-        User dbUser = userRepository.findByUsername(authRequest.getUsername().trim());
         List<String> roles = dbUser.getRoles().stream()
                 .map(r -> "ROLE_" + r.getName())
                 .collect(Collectors.toList());
 
-        // Set user ONLINE on login (respects manual override) and broadcast actual status
+        // ── 8. Send login notification email ─────────────────────────────
+        if (dbUser.getEmail() != null && !dbUser.getEmail().isBlank()) {
+            String ua = request.getHeader("User-Agent");
+            String deviceHint = parseDeviceHint(ua);
+            emailService.sendLoginNotification(dbUser, ip, deviceHint);
+        }
+
+        // ── 9. Set user ONLINE and broadcast presence ─────────────────────
         try {
-            userProfileService.setOnline(dbUser.getUsername());  // no-op if manualStatusOverride=true
-            // Re-read to get the actual status (may still be AWAY/DND if manually set)
+            userProfileService.setOnline(dbUser.getUsername());
             User freshUser = userRepository.findByUsername(dbUser.getUsername());
             String actualStatus = (freshUser != null && freshUser.getStatus() != null)
                     ? freshUser.getStatus().name() : "ONLINE";
             socketHandler.broadcastPresenceGlobally(dbUser.getUsername(), actualStatus);
         } catch (Exception ignored) {}
 
-        // ── HttpOnly cookie ───────────────────────────────────────────────
+        // ── 10. Set HttpOnly cookie ───────────────────────────────────────
         Cookie authCookie = new Cookie("AUTH_TOKEN", token);
         authCookie.setHttpOnly(true);
         authCookie.setSecure(false);   // set true behind HTTPS in production
         authCookie.setPath("/");
         authCookie.setMaxAge(2 * 60 * 60); // 2 hours
-        // SameSite=Lax ensures the cookie is sent on top-level navigations
-        // (e.g. clicking a link to /api/v1/dashboard) as well as AJAX calls.
         response.addCookie(authCookie);
         response.setHeader("Set-Cookie",
             "AUTH_TOKEN=" + token
@@ -124,7 +167,7 @@ public class AuthController {
             + "; SameSite=Lax"
             + "; Max-Age=" + (2 * 60 * 60));
 
-        // Return username, roles, and profile fields — NO token in body
+        // Return user info — NO token in body
         Map<String, Object> resp = new HashMap<>();
         resp.put("username",    userDetails.getUsername());
         resp.put("roles",       roles);
@@ -336,5 +379,19 @@ public class AuthController {
             return forwarded.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /** Extracts a human-readable device/browser hint from the User-Agent header */
+    private String parseDeviceHint(String ua) {
+        if (ua == null || ua.isBlank()) return "Unknown device";
+        if (ua.contains("Mobile") || ua.contains("Android") || ua.contains("iPhone")) {
+            if (ua.contains("iPhone") || ua.contains("iPad")) return "iPhone / iPad";
+            if (ua.contains("Android")) return "Android device";
+            return "Mobile device";
+        }
+        if (ua.contains("Windows")) return "Windows PC";
+        if (ua.contains("Macintosh") || ua.contains("Mac OS X")) return "Mac";
+        if (ua.contains("Linux")) return "Linux";
+        return "Unknown device";
     }
 }

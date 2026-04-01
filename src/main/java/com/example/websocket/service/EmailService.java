@@ -98,6 +98,52 @@ public class EmailService {
     }
 
     @Async
+    public void sendLoginNotification(User user, String ip, String deviceHint) {
+        if (!emailEnabled) return;
+        String subject = "New sign-in to your ChatApp account";
+        String time = java.time.format.DateTimeFormatter
+                .ofPattern("dd MMM yyyy, HH:mm 'UTC'")
+                .format(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        String body = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e2e8f0;border-radius:8px;'>"
+                + "<div style='text-align:center;margin-bottom:24px;'><span style='font-size:40px;'>💬</span><h1 style='color:#4f46e5;margin:8px 0;'>ChatApp</h1></div>"
+                + "<h2 style='color:#1e293b;'>New sign-in detected 🔔</h2>"
+                + "<p style='color:#475569;'>Hi <strong>" + escHtml(user.getDisplayName()) + "</strong>, we noticed a new sign-in to your account.</p>"
+                + "<table style='width:100%;border-collapse:collapse;margin:16px 0;'>"
+                + "<tr style='background:#f8fafc;'><td style='padding:10px;border:1px solid #e2e8f0;color:#64748b;width:40%;'>Time</td><td style='padding:10px;border:1px solid #e2e8f0;color:#1e293b;'>" + time + "</td></tr>"
+                + "<tr><td style='padding:10px;border:1px solid #e2e8f0;color:#64748b;'>IP Address</td><td style='padding:10px;border:1px solid #e2e8f0;color:#1e293b;'>" + escHtml(ip) + "</td></tr>"
+                + "<tr style='background:#f8fafc;'><td style='padding:10px;border:1px solid #e2e8f0;color:#64748b;'>Device</td><td style='padding:10px;border:1px solid #e2e8f0;color:#1e293b;'>" + escHtml(deviceHint) + "</td></tr>"
+                + "</table>"
+                + "<p style='color:#475569;'>If this was you, no action is needed.</p>"
+                + "<p style='color:#ef4444;font-weight:600;'>If this wasn't you, reset your password immediately:</p>"
+                + "<div style='text-align:center;margin:20px 0;'>"
+                + "<a href='" + baseUrl + "/api/v1/forgot-password' style='background:#ef4444;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;display:inline-block;'>🔑 Secure My Account</a>"
+                + "</div>"
+                + "<hr style='border:none;border-top:1px solid #e2e8f0;margin:24px 0;'>"
+                + "<p style='color:#94a3b8;font-size:12px;text-align:center;'>© ChatApp — All rights reserved</p>"
+                + "</div>";
+        sendHtml(user.getEmail(), subject, body, "LOGIN_NOTIFICATION");
+    }
+
+    @Async
+    public void sendAccountLockedEmail(User user) {
+        if (!emailEnabled) return;
+        String subject = "Your ChatApp account has been temporarily locked";
+        String body = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e2e8f0;border-radius:8px;'>"
+                + "<div style='text-align:center;margin-bottom:24px;'><span style='font-size:40px;'>💬</span><h1 style='color:#4f46e5;margin:8px 0;'>ChatApp</h1></div>"
+                + "<h2 style='color:#ef4444;'>Account Temporarily Locked 🔒</h2>"
+                + "<p style='color:#475569;'>Hi <strong>" + escHtml(user.getDisplayName()) + "</strong>, your account has been locked for <strong>15 minutes</strong> due to too many failed login attempts.</p>"
+                + "<p style='color:#475569;'>You can try again after the lockout period, or reset your password now:</p>"
+                + "<div style='text-align:center;margin:24px 0;'>"
+                + "<a href='" + baseUrl + "/api/v1/forgot-password' style='background:#4f46e5;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;display:inline-block;'>🔑 Reset Password</a>"
+                + "</div>"
+                + "<p style='color:#94a3b8;font-size:14px;'>If you did not attempt to log in, your password may be compromised. We recommend resetting it.</p>"
+                + "<hr style='border:none;border-top:1px solid #e2e8f0;margin:24px 0;'>"
+                + "<p style='color:#94a3b8;font-size:12px;text-align:center;'>© ChatApp — All rights reserved</p>"
+                + "</div>";
+        sendHtml(user.getEmail(), subject, body, "ACCOUNT_LOCKED");
+    }
+
+    @Async
     public void sendOAuthWelcomeEmail(User user, String provider) {
         if (!emailEnabled) return;
         String subject = "Welcome to ChatApp via " + capitalize(provider) + "! 🎉";

@@ -70,6 +70,13 @@ public class User implements Serializable {
     @Column(nullable = false)
     private boolean emailVerified = false;
 
+    /** How many consecutive failed login attempts since last success */
+    @Column(nullable = false)
+    private int failedLoginAttempts = 0;
+
+    /** When set, account is locked until this time (persisted across restarts) */
+    private LocalDateTime lockedUntil;
+
     /**
      * OAuth2 provider name (e.g. "google", "github").
      * Null for users who registered via username/password.
