@@ -86,9 +86,22 @@ public class AuthService implements UserDetailsService {
         return ResponseEntity.ok(Map.of("message", "User registered successfully. Check your email to verify your account."));
     }
 
+    /**
+     * Returns the username that owns the given email-verification token,
+     * without consuming or validating the token. Returns null if not found.
+     * Uses JOIN FETCH so the User is fully loaded within the session.
+     */
+    @Transactional(readOnly = true)
+    public String getUsernameForVerificationToken(String token) {
+        return emailVerificationTokenRepository.findByTokenWithUser(token)
+                .map(evt -> evt.getUser().getUsername())
+                .orElse(null);
+    }
+
     @Transactional
     public ResponseEntity<?> verifyEmail(String token) {
-        var optToken = emailVerificationTokenRepository.findByToken(token);
+        // JOIN FETCH keeps the User proxy initialised inside this transaction
+        var optToken = emailVerificationTokenRepository.findByTokenWithUser(token);
         if (optToken.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Invalid verification token."));
         var evt = optToken.get();
         if (evt.isUsed()) return ResponseEntity.badRequest().body(Map.of("error", "Token already used."));
@@ -149,6 +162,24 @@ public class AuthService implements UserDetailsService {
         user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         return ResponseEntity.ok(Map.of("message", "Password changed successfully."));
+    }
+
+    /**
+     * Sets the initial password for OAuth users who don't have one yet.
+     */
+    @Transactional
+    public ResponseEntity<?> setInitialPassword(String username, String newPassword) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return ResponseEntity.notFound().build();
+        if (user.isPasswordSet()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Password already set. Use change-password instead."));
+        }
+        String pwdError = validatePasswordStrength(newPassword);
+        if (pwdError != null) return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordSet(true);
+        userRepository.save(user);
+        return ResponseEntity.ok(Map.of("message", "Password set successfully! You can now log in with your username and password."));
     }
 
     public ResponseEntity<?> assignRole(String username, String roleName) {

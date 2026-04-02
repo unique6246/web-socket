@@ -221,6 +221,14 @@ public class AuthController {
             if (dbUser == null) {
                 return ResponseEntity.status(401).body(Map.of("error", "User not found"));
             }
+            // ── Email verification gate ───────────────────────────────────
+            if (dbUser.getEmail() != null && !dbUser.isEmailVerified()) {
+                return ResponseEntity.status(403).body(Map.of(
+                    "error", "Please verify your email before accessing ChatApp.",
+                    "unverified", true,
+                    "email", dbUser.getEmail()
+                ));
+            }
             List<String> roles = dbUser.getRoles().stream()
                     .map(r -> "ROLE_" + r.getName())
                     .collect(Collectors.toList());
@@ -244,12 +252,38 @@ public class AuthController {
 
     @GetMapping("/verify-email")
     public void verifyEmail(@RequestParam String token,
+                            HttpServletRequest request,
                             HttpServletResponse response) throws java.io.IOException {
+
+        // ── Who owns this token? ──────────────────────────────────────────
+        // Look up the token owner BEFORE verifying, so we can compare with
+        // whoever is currently logged in.
+        String tokenOwnerUsername = authService.getUsernameForVerificationToken(token);
+
+        // ── Is someone else currently logged in? ─────────────────────────
+        String activeToken = jwtService.extractToken(request);
+        if (activeToken != null && tokenOwnerUsername != null) {
+            try {
+                String loggedInUsername = jwtUtil.extractUsername(activeToken);
+                if (!loggedInUsername.equals(tokenOwnerUsername)) {
+                    // A different user is logged in — sign them out first so the
+                    // correct account gets verified, and they aren't confused.
+                    jwtService.invalidateToken(activeToken);
+                    Cookie clear = new Cookie("AUTH_TOKEN", "");
+                    clear.setHttpOnly(true);
+                    clear.setSecure(false);
+                    clear.setPath("/");
+                    clear.setMaxAge(0);
+                    response.addCookie(clear);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // ── Perform the actual verification ──────────────────────────────
         ResponseEntity<?> result = authService.verifyEmail(token);
         if (result.getStatusCode().is2xxSuccessful()) {
             response.sendRedirect("/api/v1/login?verified=true");
         } else {
-            // Extract error message for the redirect
             String msg = "verification_failed";
             if (result.getBody() instanceof java.util.Map<?,?> map && map.containsKey("error")) {
                 msg = java.net.URLEncoder.encode(map.get("error").toString(), "UTF-8");
