@@ -10,7 +10,6 @@ import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.AuthService;
 import com.example.websocket.service.EmailService;
 import com.example.websocket.service.UserProfileService;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Lazy;
@@ -19,7 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -119,8 +117,21 @@ public class AuthController {
         // ── 4. Load user from DB ──────────────────────────────────────────
         User dbUser = userRepository.findByUsername(username);
 
+        // ── 4a. Guard: OAuth-only account (no local password set) ────────
+        // This cannot happen via normal flow (Spring already rejected the auth above),
+        // but guard explicitly for clarity and to give a helpful message.
+        if (dbUser != null && (dbUser.getPassword() == null || dbUser.getPassword().isBlank())) {
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "This account uses " + (dbUser.getProvider() != null
+                    ? dbUser.getProvider().substring(0, 1).toUpperCase() + dbUser.getProvider().substring(1)
+                    : "social") + " login. Please sign in with your provider.",
+                "oauthOnly", true,
+                "provider", dbUser.getProvider() != null ? dbUser.getProvider() : ""
+            ));
+        }
+
         // ── 5. Email verification check ──────────────────────────────────
-        if (dbUser.getEmail() != null && !dbUser.isEmailVerified()) {
+        if (dbUser != null && dbUser.getEmail() != null && !dbUser.isEmailVerified()) {
             return ResponseEntity.status(403).body(Map.of(
                 "error", "Please verify your email before logging in.",
                 "unverified", true));
@@ -131,45 +142,40 @@ public class AuthController {
         authService.recordUserSuccess(username);
 
         // ── 7. Generate JWT ───────────────────────────────────────────────
-        final UserDetails userDetails = authService.loadUserByUsername(username);
-        String token = jwtUtil.generateToken(userDetails);
+        // Re-use the already-loaded dbUser — no need to call loadUserByUsername again.
         List<String> roles = dbUser.getRoles().stream()
                 .map(r -> "ROLE_" + r.getName())
                 .collect(Collectors.toList());
+        List<org.springframework.security.core.authority.SimpleGrantedAuthority> authorities =
+                roles.stream()
+                     .map(org.springframework.security.core.authority.SimpleGrantedAuthority::new)
+                     .collect(Collectors.toList());
+        org.springframework.security.core.userdetails.UserDetails userDetails =
+                new org.springframework.security.core.userdetails.User(
+                        dbUser.getUsername(), dbUser.getPassword(), authorities);
+        String token = jwtUtil.generateToken(userDetails);
 
-        // ── 8. Send login notification email ─────────────────────────────
+        // ── 8. Send login notification email (async — non-blocking) ──────
         if (dbUser.getEmail() != null && !dbUser.getEmail().isBlank()) {
             String ua = request.getHeader("User-Agent");
             String deviceHint = parseDeviceHint(ua);
             emailService.sendLoginNotification(dbUser, ip, deviceHint);
         }
 
-        // ── 9. Set user ONLINE and broadcast presence ─────────────────────
-        try {
-            userProfileService.setOnline(dbUser.getUsername());
-            User freshUser = userRepository.findByUsername(dbUser.getUsername());
-            String actualStatus = (freshUser != null && freshUser.getStatus() != null)
-                    ? freshUser.getStatus().name() : "ONLINE";
-            socketHandler.broadcastPresenceGlobally(dbUser.getUsername(), actualStatus);
-        } catch (Exception ignored) {}
-
-        // ── 10. Set HttpOnly cookie ───────────────────────────────────────
-        Cookie authCookie = new Cookie("AUTH_TOKEN", token);
-        authCookie.setHttpOnly(true);
-        authCookie.setSecure(false);   // set true behind HTTPS in production
-        authCookie.setPath("/");
-        authCookie.setMaxAge(2 * 60 * 60); // 2 hours
-        response.addCookie(authCookie);
+        // ── 9. Set HttpOnly cookie ────────────────────────────────────────
+        // Use the structured Set-Cookie header for full SameSite support.
+        // Do NOT also call response.addCookie() — that would write two Set-Cookie headers.
+        int maxAgeSecs = 2 * 60 * 60; // 2 hours
         response.setHeader("Set-Cookie",
             "AUTH_TOKEN=" + token
             + "; Path=/"
             + "; HttpOnly"
             + "; SameSite=Lax"
-            + "; Max-Age=" + (2 * 60 * 60));
+            + "; Max-Age=" + maxAgeSecs);
 
-        // Return user info — NO token in body
+        // Return user info — JWT is NOT in the response body
         Map<String, Object> resp = new HashMap<>();
-        resp.put("username",    userDetails.getUsername());
+        resp.put("username",    dbUser.getUsername());
         resp.put("roles",       roles);
         resp.put("displayName", dbUser.getDisplayName() != null ? dbUser.getDisplayName() : dbUser.getUsername());
         resp.put("avatarUrl",   dbUser.getAvatarUrl()   != null ? dbUser.getAvatarUrl()   : "");
@@ -242,7 +248,8 @@ public class AuthController {
             resp.put("emailVerified", dbUser.isEmailVerified());
             resp.put("email", dbUser.getEmail() != null ? dbUser.getEmail() : "");
             resp.put("phone", dbUser.getPhone() != null ? dbUser.getPhone() : "");
-            resp.put("passwordSet", dbUser.isPasswordSet());
+            // hasPassword: false for OAuth users who haven't added a local password yet
+            resp.put("hasPassword", dbUser.getPassword() != null && !dbUser.getPassword().isBlank());
             resp.put("provider", dbUser.getProvider() != null ? dbUser.getProvider() : "");
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
@@ -252,41 +259,16 @@ public class AuthController {
 
     @GetMapping("/verify-email")
     public void verifyEmail(@RequestParam String token,
-                            HttpServletRequest request,
                             HttpServletResponse response) throws java.io.IOException {
 
-        // ── Who owns this token? ──────────────────────────────────────────
-        // Look up the token owner BEFORE verifying, so we can compare with
-        // whoever is currently logged in.
-        String tokenOwnerUsername = authService.getUsernameForVerificationToken(token);
-
-        // ── Is someone else currently logged in? ─────────────────────────
-        String activeToken = jwtService.extractToken(request);
-        if (activeToken != null && tokenOwnerUsername != null) {
-            try {
-                String loggedInUsername = jwtUtil.extractUsername(activeToken);
-                if (!loggedInUsername.equals(tokenOwnerUsername)) {
-                    // A different user is logged in — sign them out first so the
-                    // correct account gets verified, and they aren't confused.
-                    jwtService.invalidateToken(activeToken);
-                    Cookie clear = new Cookie("AUTH_TOKEN", "");
-                    clear.setHttpOnly(true);
-                    clear.setSecure(false);
-                    clear.setPath("/");
-                    clear.setMaxAge(0);
-                    response.addCookie(clear);
-                }
-            } catch (Exception ignored) {}
-        }
-
-        // ── Perform the actual verification ──────────────────────────────
         ResponseEntity<?> result = authService.verifyEmail(token);
         if (result.getStatusCode().is2xxSuccessful()) {
             response.sendRedirect("/api/v1/login?verified=true");
         } else {
             String msg = "verification_failed";
             if (result.getBody() instanceof java.util.Map<?,?> map && map.containsKey("error")) {
-                msg = java.net.URLEncoder.encode(map.get("error").toString(), "UTF-8");
+                msg = java.net.URLEncoder.encode(map.get("error").toString(),
+                        java.nio.charset.StandardCharsets.UTF_8);
             }
             response.sendRedirect("/api/v1/login?error=" + msg);
         }
@@ -308,24 +290,6 @@ public class AuthController {
         return authService.resetPassword(token, password);
     }
 
-    @PutMapping("/update-profile")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> updateProfile(@RequestBody Map<String, String> body, HttpServletRequest request) {
-        String token = jwtService.extractToken(request);
-        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
-        String username = jwtUtil.extractUsername(token);
-        try {
-            com.example.websocket.model.UserStatus status = null;
-            if (body.get("status") != null) {
-                try { status = com.example.websocket.model.UserStatus.valueOf(body.get("status").toUpperCase()); } catch (Exception ignored) {}
-            }
-            var profile = userProfileService.updateProfile(username, body.get("displayName"), body.get("bio"), body.get("avatarUrl"), body.get("phone"), status);
-            return ResponseEntity.ok(profile);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        }
-    }
-
     @PostMapping("/logout")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response) {
@@ -333,30 +297,24 @@ public class AuthController {
         String username = null;
         if (token != null) {
             try { username = jwtUtil.extractUsername(token); } catch (Exception ignored) {}
-            jwtService.invalidateToken(token); // blacklist the token
+            jwtService.invalidateToken(token);
         }
 
-        // On explicit logout, force OFFLINE and clear manual override
+        // On explicit logout, always force OFFLINE (clears manual status override too)
         if (username != null) {
             try {
-                User u = userRepository.findByUsername(username);
-                if (u != null) {
-                    u.setManualStatusOverride(false);
-                    u.setStatus(com.example.websocket.model.UserStatus.OFFLINE);
-                    u.setLastSeen(java.time.LocalDateTime.now());
-                    userRepository.save(u);
-                }
+                userProfileService.forceOffline(username);
                 socketHandler.broadcastPresenceGlobally(username, "OFFLINE");
             } catch (Exception ignored) {}
         }
 
-        // Clear the auth cookie
-        Cookie authCookie = new Cookie("AUTH_TOKEN", "");
-        authCookie.setHttpOnly(true);
-        authCookie.setSecure(false); // true in production with HTTPS
-        authCookie.setPath("/");
-        authCookie.setMaxAge(0);
-        response.addCookie(authCookie);
+        // Clear the auth cookie using structured Set-Cookie header for SameSite support
+        response.setHeader("Set-Cookie",
+            "AUTH_TOKEN="
+            + "; Path=/"
+            + "; HttpOnly"
+            + "; SameSite=Lax"
+            + "; Max-Age=0");
         return ResponseEntity.ok(Map.of("message", "Logged out successfully."));
     }
 
@@ -383,53 +341,39 @@ public class AuthController {
     public ResponseEntity<?> changePassword(@RequestBody Map<String, String> requestBody,
                                              HttpServletRequest request) {
         String token = jwtService.extractToken(request);
-        if (token == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
-        }
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
         String username = jwtUtil.extractUsername(token);
         String oldPassword = requestBody.get("oldPassword");
         String newPassword = requestBody.get("newPassword");
-
-        if (oldPassword == null || oldPassword.isBlank()) {
+        if (oldPassword == null || oldPassword.isBlank())
             return ResponseEntity.badRequest().body(Map.of("error", "Current password is required."));
-        }
         String pwdError = validatePasswordStrength(newPassword);
-        if (pwdError != null) {
-            return ResponseEntity.badRequest().body(Map.of("error", pwdError));
-        }
-        if (oldPassword.equals(newPassword)) {
+        if (pwdError != null) return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+        if (oldPassword.equals(newPassword))
             return ResponseEntity.badRequest().body(Map.of("error", "New password must differ from current password."));
-        }
         return authService.changePassword(username, oldPassword, newPassword);
     }
 
     /**
-     * Allows OAuth users (who have no password yet) to set a password for the first time.
-     * After this, they can also log in with username + password.
+     * Lets an OAuth user voluntarily add a local password to their account.
+     * This is entirely optional — exactly how Facebook, Slack, and GitHub handle it.
+     * The account remains secured by the OAuth provider; adding a password
+     * simply enables an additional username+password login path.
+     * No redirect, no forced prompt — purely user-initiated from Security settings.
      */
-    @PostMapping("/set-password")
+    @PostMapping("/add-password")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> setPassword(@RequestBody Map<String, String> requestBody,
+    public ResponseEntity<?> addPassword(@RequestBody Map<String, String> requestBody,
                                           HttpServletRequest request) {
         String token = jwtService.extractToken(request);
-        if (token == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
-        }
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
         String username = jwtUtil.extractUsername(token);
-        User user = userRepository.findByUsername(username);
-        if (user == null) {
-            return ResponseEntity.status(404).body(Map.of("error", "User not found"));
-        }
-        if (user.isPasswordSet()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Password already set. Use 'Change Password' instead."));
-        }
         String newPassword = requestBody.get("newPassword");
         String pwdError = validatePasswordStrength(newPassword);
-        if (pwdError != null) {
-            return ResponseEntity.badRequest().body(Map.of("error", pwdError));
-        }
-        return authService.setInitialPassword(username, newPassword);
+        if (pwdError != null) return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+        return authService.addPasswordToOAuthAccount(username, newPassword);
     }
+
 
     // ── Helpers ───────────────────────────────────────────────────────
 

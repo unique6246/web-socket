@@ -86,17 +86,6 @@ public class AuthService implements UserDetailsService {
         return ResponseEntity.ok(Map.of("message", "User registered successfully. Check your email to verify your account."));
     }
 
-    /**
-     * Returns the username that owns the given email-verification token,
-     * without consuming or validating the token. Returns null if not found.
-     * Uses JOIN FETCH so the User is fully loaded within the session.
-     */
-    @Transactional(readOnly = true)
-    public String getUsernameForVerificationToken(String token) {
-        return emailVerificationTokenRepository.findByTokenWithUser(token)
-                .map(evt -> evt.getUser().getUsername())
-                .orElse(null);
-    }
 
     @Transactional
     public ResponseEntity<?> verifyEmail(String token) {
@@ -154,6 +143,17 @@ public class AuthService implements UserDetailsService {
     public ResponseEntity<?> changePassword(String username, String oldPassword, String newPassword) {
         User user = userRepository.findByUsername(username);
         if (user == null) return ResponseEntity.notFound().build();
+
+        // OAuth users who haven't added a local password yet have an empty password field.
+        // They must use addPasswordToOAuthAccount() first — tell them clearly.
+        boolean hasNoLocalPassword = user.getPassword() == null || user.getPassword().isBlank();
+        if (hasNoLocalPassword) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Your account has no local password. Use 'Add a password' to create one first.",
+                "noPassword", true
+            ));
+        }
+
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Current password is incorrect."));
         }
@@ -165,22 +165,39 @@ public class AuthService implements UserDetailsService {
     }
 
     /**
-     * Sets the initial password for OAuth users who don't have one yet.
+     * Voluntarily adds a local password to an OAuth account that has none yet.
+     * This is entirely optional — exactly how Facebook / Slack handle it.
+     * The account was and remains secured by the OAuth provider;
+     * adding a password simply gives an additional login method.
      */
     @Transactional
-    public ResponseEntity<?> setInitialPassword(String username, String newPassword) {
+    public ResponseEntity<?> addPasswordToOAuthAccount(String username, String newPassword) {
         User user = userRepository.findByUsername(username);
         if (user == null) return ResponseEntity.notFound().build();
-        if (user.isPasswordSet()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Password already set. Use change-password instead."));
+
+        // Only valid for accounts that have no local password yet
+        boolean hasPassword = user.getPassword() != null && !user.getPassword().isBlank();
+        if (hasPassword) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Your account already has a password. Use 'Change Password' instead."
+            ));
+        }
+        // Must be an OAuth-linked account
+        if (user.getProvider() == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "This endpoint is only for OAuth accounts."
+            ));
         }
         String pwdError = validatePasswordStrength(newPassword);
         if (pwdError != null) return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+
         user.setPassword(passwordEncoder.encode(newPassword));
-        user.setPasswordSet(true);
         userRepository.save(user);
-        return ResponseEntity.ok(Map.of("message", "Password set successfully! You can now log in with your username and password."));
+        return ResponseEntity.ok(Map.of(
+            "message", "Password added. You can now also sign in with your username and password."
+        ));
     }
+
 
     public ResponseEntity<?> assignRole(String username, String roleName) {
         User user = userRepository.findByUsername(username);
