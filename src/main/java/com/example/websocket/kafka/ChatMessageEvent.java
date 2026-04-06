@@ -67,6 +67,9 @@ public class ChatMessageEvent implements Serializable {
     /** Notification ID (used for NOTIFICATION events) */
     private Long notificationId;
 
+    /** Carries the group display name for GROUP_CREATED events */
+    private String displayName;
+
     /** Convenience constructor for a basic chat message (backward compat) */
     public ChatMessageEvent(String sender, String roomName, String content,
                              String fileUrl, String fileType, String fileName,
@@ -92,6 +95,7 @@ public class ChatMessageEvent implements Serializable {
         MESSAGE_DELETE,
         PIN,
         NOTIFICATION,
-        UNREAD_COUNT
+        UNREAD_COUNT,
+        GROUP_CREATED
     }
 }
