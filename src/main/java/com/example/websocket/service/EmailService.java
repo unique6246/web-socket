@@ -22,7 +22,10 @@ public class EmailService {
     private final JavaMailSender mailSender;
     private final EmailLogRepository emailLogRepository;
 
-    @Value("${spring.mail.username:noreply@chatapp.com}")
+    @Value("${spring.mail.username:pintu}")
+    private String smtpUsername;
+
+    @Value("${app.email.from:pintu@chatapp.com}")
     private String fromAddress;
 
     @Value("${app.base-url:http://localhost:8080}")
@@ -162,12 +165,14 @@ public class EmailService {
     }
 
     private void sendHtml(String to, String subject, String htmlBody, String emailType) {
+        // Use SMTP username as sender when configured (production), otherwise use the from address (MailHog dev)
+        String effectiveFrom = (smtpUsername != null && !smtpUsername.isBlank()) ? smtpUsername : fromAddress;
         boolean success = false;
         String errorMsg = null;
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
-            helper.setFrom(fromAddress);
+            helper.setFrom(effectiveFrom);
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlBody, true);
