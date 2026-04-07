@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>Kafka Consumer Monitor – ChatApp</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #c9d1d9;
+      --muted:   #6e7681;
+      --green:   #3fb950;
+      --blue:    #58a6ff;
+      --yellow:  #d29922;
+      --orange:  #f0883e;
+      --red:     #f85149;
+      --purple:  #bc8cff;
+      --cyan:    #39d3f2;
+      --pink:    #f778ba;
+    }
+    body { font-family: 'Segoe UI', Consolas, monospace; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+
+    /* ── Navbar ── */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 24px; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 14px; }
+    .topbar-brand { font-size: 1.1em; font-weight: 700; color: var(--blue); display: flex; align-items: center; gap: 8px; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; box-shadow: 0 0 0 3px rgba(63,185,80,.25); animation: pulse 1.4s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.85)} }
+    .live-dot.dead { background: var(--red); box-shadow: 0 0 0 3px rgba(248,81,73,.2); animation: none; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: .82em; font-family: inherit; transition: all .15s; }
+    .btn:hover { background: #21262d; border-color: #8b949e; }
+    .btn-danger { border-color: var(--red); color: var(--red); }
+    .btn-danger:hover { background: rgba(248,81,73,.1); }
+    .counter-pill { font-size: .78em; background: #21262d; border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; color: var(--muted); }
+
+    /* ── Stats bar ── */
+    .stats-bar {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .stat-card {
+      flex: 1; padding: 14px 20px; border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .stat-card:last-child { border-right: none; }
+    .stat-label { font-size: .72em; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-value { font-size: 1.6em; font-weight: 700; font-family: 'Consolas', monospace; }
+
+    /* ── Main 3-column layout ── */
+    .monitor-layout {
+      display: flex; flex: 1; overflow: hidden; min-height: 0;
+    }
+
+    /* ── Consumer column ── */
+    .consumer-col {
+      flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .consumer-col:last-child { border-right: none; }
+
+    .consumer-header {
+      padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0; background: var(--surface);
+    }
+    .consumer-name { font-size: .88em; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .consumer-group { font-size: .72em; color: var(--muted); margin-top: 3px; font-family: Consolas, monospace; }
+    .consumer-desc { font-size: .75em; color: #8b949e; margin-top: 6px; line-height: 1.5; }
+
+    .group-tag {
+      font-size: .7em; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .4px;
+    }
+    .tag-broadcast   { background: rgba(88,166,255,.15); color: var(--blue); border: 1px solid rgba(88,166,255,.3); }
+    .tag-persistence { background: rgba(63,185,80,.15);  color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+    .tag-push        { background: rgba(188,140,255,.15);color: var(--purple); border: 1px solid rgba(188,140,255,.3); }
+
+    .event-feed {
+      flex: 1; overflow-y: auto; padding: 8px 0;
+    }
+    .event-feed::-webkit-scrollbar { width: 5px; }
+    .event-feed::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    /* ── Event cards ── */
+    .event-card {
+      margin: 4px 8px; border-radius: 8px; border: 1px solid var(--border);
+      background: #0d1117; overflow: hidden;
+      animation: slideIn .25s ease;
+    }
+    @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+    .event-card.skipped { opacity: .45; }
+    .event-card.new-flash { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(88,166,255,.3); }
+
+    .event-card-header {
+      display: flex; align-items: center; gap: 8px; padding: 7px 10px 5px;
+      border-bottom: 1px solid var(--border);
+    }
+    .event-seq { font-size: .68em; color: var(--muted); font-family: Consolas; flex-shrink: 0; }
+    .event-time { font-size: .7em; color: var(--muted); font-family: Consolas; flex-shrink: 0; }
+    .event-type-badge {
+      font-size: .7em; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .3px; flex-shrink: 0;
+    }
+    .type-MESSAGE     { background: rgba(88,166,255,.18); color: var(--blue); }
+    .type-TYPING      { background: rgba(210,153,34,.15); color: var(--yellow); }
+    .type-READ_RECEIPT{ background: rgba(63,185,80,.15);  color: var(--green); }
+    .type-PRESENCE    { background: rgba(57,211,242,.15); color: var(--cyan); }
+    .type-REACTION    { background: rgba(247,120,186,.15);color: var(--pink); }
+    .type-MESSAGE_EDIT  { background: rgba(240,136,62,.15);color: var(--orange); }
+    .type-MESSAGE_DELETE{ background: rgba(248,81,73,.15); color: var(--red); }
+    .type-PIN           { background: rgba(188,140,255,.15);color: var(--purple); }
+    .type-UNKNOWN       { background: #21262d; color: var(--muted); }
+
+    .event-card-body { padding: 7px 10px 8px; display: flex; flex-direction: column; gap: 4px; }
+
+    .event-row { display: flex; gap: 6px; font-size: .75em; align-items: baseline; }
+    .event-key { color: var(--muted); min-width: 54px; flex-shrink: 0; }
+    .event-val { color: var(--text); word-break: break-all; }
+    .event-val.sender { color: var(--blue); font-weight: 600; }
+    .event-val.room   { color: var(--cyan); }
+    .event-val.content{ color: var(--text); font-style: italic; }
+    .event-val.presence-online  { color: var(--green); font-weight: 600; }
+    .event-val.presence-offline { color: var(--muted); }
+    .event-val.presence-away    { color: var(--yellow); }
+    .event-val.presence-dnd     { color: var(--red); }
+
+    .event-action {
+      margin-top: 4px; padding: 5px 8px; border-radius: 5px;
+      background: #161b22; border: 1px solid var(--border);
+      font-size: .72em; color: #8b949e; line-height: 1.5;
+      font-family: Consolas, monospace;
+    }
+    .event-action.action-skipped { color: var(--red); border-color: rgba(248,81,73,.3); background: rgba(248,81,73,.05); }
+    .event-action.action-ok      { color: var(--green); }
+    .event-action.action-error   { color: var(--red); font-weight: 700; }
+
+    .skipped-tag {
+      font-size: .65em; background: rgba(248,81,73,.12); color: var(--red);
+      border: 1px solid rgba(248,81,73,.3); padding: 1px 6px; border-radius: 4px;
+      margin-left: auto; flex-shrink: 0;
+    }
+
+    /* ── Flow legend at bottom ── */
+    .flow-legend {
+      border-top: 1px solid var(--border); padding: 10px 20px;
+      display: flex; gap: 18px; flex-wrap: wrap; flex-shrink: 0;
+      background: var(--surface); font-size: .72em; color: var(--muted);
+    }
+    .flow-item { display: flex; align-items: center; gap: 6px; }
+    .flow-dot  { width: 6px; height: 6px; border-radius: 50%; }
+
+    /* ── Empty state ── */
+    .empty-feed {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      height: 100%; gap: 10px; color: var(--muted);
+    }
+    .empty-icon { font-size: 2.5em; opacity: .4; }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex; gap: 6px; padding: 8px 8px 6px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+    }
+    .filter-btn {
+      font-size: .68em; padding: 2px 9px; border-radius: 12px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--muted); cursor: pointer; transition: all .12s; font-family: inherit;
+    }
+    .filter-btn.active  { background: rgba(88,166,255,.15); color: var(--blue); border-color: rgba(88,166,255,.4); }
+    .filter-btn:hover   { border-color: #8b949e; color: var(--text); }
+
+    /* ── Pause overlay ── */
+    .paused-banner {
+      text-align: center; padding: 6px; background: rgba(210,153,34,.12);
+      border-bottom: 1px solid rgba(210,153,34,.3); color: var(--yellow);
+      font-size: .78em; flex-shrink: 0; display: none;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ── -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-brand">
+      <span id="liveDot" class="live-dot"></span>
+      📡 Kafka Consumer Monitor
+    </div>
+    <span id="sseStatus" style="font-size:.78em;color:var(--muted);">Connecting…</span>
+  </div>
+  <div class="topbar-right">
+    <span class="counter-pill" id="totalCounter">0 events</span>
+    <button class="btn" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+    <button class="btn" id="clearBtn" onclick="clearAll()">🗑 Clear</button>
+    <button class="btn" id="autoScrollBtn" onclick="toggleAutoScroll()" style="color:var(--green);">↓ Auto-scroll ON</button>
+    <a href="/api/v1/dashboard" class="btn">← Dashboard</a>
+  </div>
+</div>
+
+<!-- ── Stats bar ── -->
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-label">Total Events</div>
+    <div class="stat-value" id="statTotal" style="color:var(--blue)">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Messages</div>
+    <div class="stat-value" id="statMessages" style="color:var(--blue)">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Typing / Read</div>
+    <div class="stat-value" id="statEphemeral" style="color:var(--yellow)">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Presence</div>
+    <div class="stat-value" id="statPresence" style="color:var(--cyan)">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Skipped</div>
+    <div class="stat-value" id="statSkipped" style="color:var(--muted)">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">DB Writes</div>
+    <div class="stat-value" id="statDbWrites" style="color:var(--green)">0</div>
+  </div>
+</div>
+
+<!-- ── Paused banner ── -->
+<div class="paused-banner" id="pausedBanner">⏸ Stream paused — events are queued</div>
+
+<!-- ── 3 Consumer columns ── -->
+<div class="monitor-layout">
+
+  <!-- Consumer 1: WS Broadcast -->
+  <div class="consumer-col" id="col-broadcast">
+    <div class="consumer-header">
+      <div class="consumer-name">
+        <span>🔊 WebSocket Fan-out</span>
+        <span class="group-tag tag-broadcast">Broadcast</span>
+      </div>
+      <div class="consumer-group">group: ws-broadcast-{instanceId} &nbsp;·&nbsp; unique per server</div>
+      <div class="consumer-desc">Every server instance receives every message and fans it out to locally-connected WebSocket sessions. PRESENCE broadcasts globally; all others go to the room.</div>
+      <div class="filter-bar" id="filter-broadcast">
+        <button class="filter-btn active" data-col="broadcast" data-type="ALL" onclick="setFilter('broadcast','ALL',this)">All</button>
+        <button class="filter-btn" data-col="broadcast" data-type="MESSAGE" onclick="setFilter('broadcast','MESSAGE',this)">MESSAGE</button>
+        <button class="filter-btn" data-col="broadcast" data-type="TYPING" onclick="setFilter('broadcast','TYPING',this)">TYPING</button>
+        <button class="filter-btn" data-col="broadcast" data-type="READ_RECEIPT" onclick="setFilter('broadcast','READ_RECEIPT',this)">READ</button>
+        <button class="filter-btn" data-col="broadcast" data-type="PRESENCE" onclick="setFilter('broadcast','PRESENCE',this)">PRESENCE</button>
+      </div>
+    </div>
+    <div class="event-feed" id="feed-broadcast">
+      <div class="empty-feed"><div class="empty-icon">📭</div><span>Waiting for events…</span></div>
+    </div>
+  </div>
+
+  <!-- Consumer 2: DB Persistence -->
+  <div class="consumer-col" id="col-persistence">
+    <div class="consumer-header">
+      <div class="consumer-name">
+        <span>💾 Database Persistence</span>
+        <span class="group-tag tag-persistence">Shared</span>
+      </div>
+      <div class="consumer-group">group: chat-persistence &nbsp;·&nbsp; exactly-one write across cluster</div>
+      <div class="consumer-desc">Only one server writes each message to MySQL. Non-MESSAGE events are skipped. After INSERT: pushes MESSAGE_ID_ASSIGN, unread counts, DM & @mention notifications.</div>
+      <div class="filter-bar" id="filter-persistence">
+        <button class="filter-btn active" data-col="persistence" data-type="ALL" onclick="setFilter('persistence','ALL',this)">All</button>
+        <button class="filter-btn" data-col="persistence" data-type="MESSAGE" onclick="setFilter('persistence','MESSAGE',this)">MESSAGE</button>
+        <button class="filter-btn" data-col="persistence" data-type="SKIPPED" onclick="setFilter('persistence','SKIPPED',this)">Skipped</button>
+      </div>
+    </div>
+    <div class="event-feed" id="feed-persistence">
+      <div class="empty-feed"><div class="empty-icon">📭</div><span>Waiting for events…</span></div>
+    </div>
+  </div>
+
+  <!-- Consumer 3: Push Notifications -->
+  <div class="consumer-col" id="col-push">
+    <div class="consumer-header">
+      <div class="consumer-name">
+        <span>📲 Push Notifications</span>
+        <span class="group-tag tag-push">Shared</span>
+      </div>
+      <div class="consumer-group">group: push-notifications &nbsp;·&nbsp; exactly-one push per message</div>
+      <div class="consumer-desc">Stub for FCM/APNs mobile push. Only MESSAGE events trigger this; ephemeral events are skipped. One server sends per message — prevents duplicate mobile pushes.</div>
+      <div class="filter-bar" id="filter-push">
+        <button class="filter-btn active" data-col="push" data-type="ALL" onclick="setFilter('push','ALL',this)">All</button>
+        <button class="filter-btn" data-col="push" data-type="MESSAGE" onclick="setFilter('push','MESSAGE',this)">MESSAGE</button>
+        <button class="filter-btn" data-col="push" data-type="SKIPPED" onclick="setFilter('push','SKIPPED',this)">Skipped</button>
+      </div>
+    </div>
+    <div class="event-feed" id="feed-push">
+      <div class="empty-feed"><div class="empty-icon">📭</div><span>Waiting for events…</span></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Legend ── -->
+<div class="flow-legend">
+  <span style="color:#8b949e;font-weight:600;">Event Types:</span>
+  <span class="flow-item"><span class="flow-dot" style="background:var(--blue)"></span>MESSAGE — persisted to DB, fanned out to room</span>
+  <span class="flow-item"><span class="flow-dot" style="background:var(--yellow)"></span>TYPING — ephemeral, fan-out only</span>
+  <span class="flow-item"><span class="flow-dot" style="background:var(--green)"></span>READ_RECEIPT — ephemeral, fan-out only</span>
+  <span class="flow-item"><span class="flow-dot" style="background:var(--cyan)"></span>PRESENCE — global broadcast to all sessions</span>
+  <span class="flow-item"><span class="flow-dot" style="background:var(--red)"></span>Skipped — consumer intentionally ignored this event type</span>
+  <span style="margin-left:auto;color:var(--muted);">💡 Only ADMIN users can view this page</span>
+</div>
+
+<script>
+  // ── Guard ────────────────────────────────────────────────────────────────
+  (async function guard() {
+    try {
+      const r = await fetch("/api/auth/me", { credentials: "include" });
+      if (!r.ok) { location.href = "/api/v1/login"; return; }
+      const d = await r.json();
+      if (!(d.roles || []).includes("ROLE_ADMIN")) {
+        document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:sans-serif;background:#0d1117;color:#c9d1d9;">
+          <h2>⛔ Access Denied</h2><p>ADMIN role required.</p>
+          <a href="/api/v1/chat" style="color:#58a6ff;">← Back to Chat</a></div>`;
+        return;
+      }
+      init();
+    } catch(e) { location.href = "/api/v1/login"; }
+  })();
+
+  // ── State ────────────────────────────────────────────────────────────────
+  let paused       = false;
+  let autoScroll   = true;
+  let totalEvents  = 0;
+  let pauseQueue   = [];
+  let eventSource  = null;
+
+  const stats = { total:0, messages:0, ephemeral:0, presence:0, skipped:0, dbWrites:0 };
+  const filters = { broadcast:"ALL", persistence:"ALL", push:"ALL" };
+
+  // Map group string from server → column key
+  const GROUP_MAP = {
+    "ws-broadcast":       "broadcast",
+    "chat-persistence":   "persistence",
+    "push-notifications": "push"
+  };
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+  async function init() {
+    // Load history
+    try {
+      const r = await fetch("/api/kafka-monitor/events?limit=200", { credentials:"include" });
+      if (r.ok) {
+        const events = await r.json();
+        events.forEach(ev => renderEvent(ev, false));
+      }
+    } catch(e) {}
+
+    // Subscribe to SSE stream
+    connectSse();
+  }
+
+  function connectSse() {
+    const dot    = document.getElementById("liveDot");
+    const status = document.getElementById("sseStatus");
+
+    // Pass the auth cookie automatically (SSE uses credentials)
+    eventSource = new EventSource("/api/kafka-monitor/stream");
+
+    eventSource.addEventListener("kafka-event", e => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (paused) { pauseQueue.push(ev); return; }
+        renderEvent(ev, true);
+      } catch(err) {}
+    });
+
+    eventSource.onopen = () => {
+      dot.className    = "live-dot";
+      status.textContent = "🟢 Live stream connected";
+      status.style.color = "var(--green)";
+    };
+    eventSource.onerror = () => {
+      dot.className    = "live-dot dead";
+      status.textContent = "🔴 Stream disconnected — retrying…";
+      status.style.color = "var(--red)";
+    };
+  }
+
+  // ── Render one event into the correct column ──────────────────────────────
+  function renderEvent(ev, animate) {
+    const colKey = GROUP_MAP[ev.group];
+    if (!colKey) return;
+
+    // Update stats
+    stats.total++;
+    if (ev.eventType === "MESSAGE")                              stats.messages++;
+    if (ev.eventType === "TYPING" || ev.eventType === "READ_RECEIPT") stats.ephemeral++;
+    if (ev.eventType === "PRESENCE")                             stats.presence++;
+    if (ev.skipped)                                              stats.skipped++;
+    if (colKey === "persistence" && !ev.skipped && ev.eventType === "MESSAGE") stats.dbWrites++;
+    updateStats();
+
+    // Filter check
+    if (!passesFilter(colKey, ev)) return;
+
+    const feed = document.getElementById("feed-" + colKey);
+    if (!feed) return;
+
+    // Remove empty state
+    feed.querySelector(".empty-feed")?.remove();
+
+    // Build card
+    const card = document.createElement("div");
+    card.className = "event-card" + (ev.skipped ? " skipped" : "") + (animate ? " new-flash" : "");
+    if (animate) setTimeout(() => card.classList.remove("new-flash"), 600);
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "event-card-header";
+    header.innerHTML = `
+      <span class="event-seq">#${ev.seq}</span>
+      <span class="event-type-badge type-${ev.eventType || 'UNKNOWN'}">${ev.eventType || '?'}</span>
+      <span class="event-time">${esc(ev.time)}</span>
+      ${ev.skipped ? '<span class="skipped-tag">SKIPPED</span>' : ''}`;
+
+    // Body
+    const body = document.createElement("div");
+    body.className = "event-card-body";
+
+    let rows = "";
+    if (ev.sender)  rows += row("sender",  `<span class="event-val sender">${esc(ev.sender)}</span>`);
+    if (ev.room)    rows += row("room",     `<span class="event-val room">${esc(ev.room)}</span>`);
+    if (ev.content) rows += row("content",  `<span class="event-val content">"${esc(ev.content)}"</span>`);
+    if (ev.file)    rows += row("file",     `<span class="event-val">${esc(ev.file)}</span>`);
+    if (ev.presence){
+      const pc = ev.presence.toLowerCase();
+      rows += row("status", `<span class="event-val presence-${pc}">${esc(ev.presence)}</span>`);
+    }
+    if (ev.messageId) rows += row("msgId", `<span class="event-val">${esc(ev.messageId)}</span>`);
+    if (ev.server)  rows += row("server",  `<span class="event-val" style="color:var(--muted);font-size:.9em">${esc(ev.server)}</span>`);
+
+    const isError   = ev.action && ev.action.startsWith("ERROR");
+    const isSkipped = ev.skipped;
+    const actionCls = isError ? "action-error" : isSkipped ? "action-skipped" : "action-ok";
+    const actionIcon= isError ? "❌" : isSkipped ? "⏭" : "✅";
+
+    rows += `<div class="event-action ${actionCls}">${actionIcon} ${esc(ev.action)}</div>`;
+    body.innerHTML = rows;
+
+    card.appendChild(header);
+    card.appendChild(body);
+    feed.appendChild(card);
+
+    // Cap feed at 200 items to avoid DOM bloat
+    while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+
+    if (autoScroll) feed.scrollTop = feed.scrollHeight;
+    document.getElementById("totalCounter").textContent = stats.total + " events";
+  }
+
+  function row(key, valHtml) {
+    return `<div class="event-row"><span class="event-key">${key}</span>${valHtml}</div>`;
+  }
+  function esc(s) {
+    if (!s && s !== 0) return "";
+    const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML;
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  function updateStats() {
+    document.getElementById("statTotal").textContent    = stats.total;
+    document.getElementById("statMessages").textContent = stats.messages;
+    document.getElementById("statEphemeral").textContent= stats.ephemeral;
+    document.getElementById("statPresence").textContent = stats.presence;
+    document.getElementById("statSkipped").textContent  = stats.skipped;
+    document.getElementById("statDbWrites").textContent = stats.dbWrites;
+  }
+
+  // ── Filters ───────────────────────────────────────────────────────────────
+  function setFilter(col, type, btn) {
+    filters[col] = type;
+    document.querySelectorAll(`#filter-${col} .filter-btn`).forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    rebuildFeed(col);
+  }
+
+  function passesFilter(col, ev) {
+    const f = filters[col];
+    if (f === "ALL")     return true;
+    if (f === "SKIPPED") return ev.skipped;
+    return ev.eventType === f;
+  }
+
+  function rebuildFeed(col) {
+    // Clear and re-render from history for this column
+    const feed = document.getElementById("feed-" + col);
+    feed.innerHTML = "";
+    // Re-fetch from server
+    fetch("/api/kafka-monitor/events?limit=200", { credentials:"include" })
+      .then(r => r.json())
+      .then(events => {
+        events.filter(ev => GROUP_MAP[ev.group] === col).forEach(ev => {
+          if (passesFilter(col, ev)) renderSingleInFeed(col, ev, false);
+        });
+        if (!feed.children.length) feed.innerHTML = '<div class="empty-feed"><div class="empty-icon">🔍</div><span>No matching events</span></div>';
+      }).catch(() => {});
+  }
+
+  function renderSingleInFeed(col, ev, animate) {
+    // Same as renderEvent but targeted to one column, skipping stats update
+    const feed = document.getElementById("feed-" + col);
+    if (!feed) return;
+    feed.querySelector(".empty-feed")?.remove();
+    const card = document.createElement("div");
+    card.className = "event-card" + (ev.skipped ? " skipped" : "");
+    const header = document.createElement("div");
+    header.className = "event-card-header";
+    header.innerHTML = `
+      <span class="event-seq">#${ev.seq}</span>
+      <span class="event-type-badge type-${ev.eventType || 'UNKNOWN'}">${ev.eventType || '?'}</span>
+      <span class="event-time">${esc(ev.time)}</span>
+      ${ev.skipped ? '<span class="skipped-tag">SKIPPED</span>' : ''}`;
+    const body = document.createElement("div");
+    body.className = "event-card-body";
+    let rows = "";
+    if (ev.sender)  rows += row("sender",  `<span class="event-val sender">${esc(ev.sender)}</span>`);
+    if (ev.room)    rows += row("room",     `<span class="event-val room">${esc(ev.room)}</span>`);
+    if (ev.content) rows += row("content",  `<span class="event-val content">"${esc(ev.content)}"</span>`);
+    if (ev.presence){
+      const pc = ev.presence.toLowerCase();
+      rows += row("status", `<span class="event-val presence-${pc}">${esc(ev.presence)}</span>`);
+    }
+    if (ev.messageId) rows += row("msgId", `<span class="event-val">${esc(ev.messageId)}</span>`);
+    const isError = ev.action && ev.action.startsWith("ERROR");
+    const actionCls = isError ? "action-error" : ev.skipped ? "action-skipped" : "action-ok";
+    const actionIcon= isError ? "❌" : ev.skipped ? "⏭" : "✅";
+    rows += `<div class="event-action ${actionCls}">${actionIcon} ${esc(ev.action)}</div>`;
+    body.innerHTML = rows;
+    card.appendChild(header); card.appendChild(body);
+    feed.appendChild(card);
+  }
+
+  // ── Controls ──────────────────────────────────────────────────────────────
+  function togglePause() {
+    paused = !paused;
+    const btn = document.getElementById("pauseBtn");
+    const banner = document.getElementById("pausedBanner");
+    if (paused) {
+      btn.textContent = "▶ Resume";
+      btn.style.color = "var(--yellow)";
+      banner.style.display = "block";
+    } else {
+      btn.textContent = "⏸ Pause";
+      btn.style.color = "";
+      banner.style.display = "none";
+      // Flush queued events
+      pauseQueue.forEach(ev => renderEvent(ev, true));
+      pauseQueue = [];
+    }
+  }
+
+  function toggleAutoScroll() {
+    autoScroll = !autoScroll;
+    const btn = document.getElementById("autoScrollBtn");
+    btn.textContent = autoScroll ? "↓ Auto-scroll ON" : "↓ Auto-scroll OFF";
+    btn.style.color  = autoScroll ? "var(--green)" : "var(--muted)";
+  }
+
+  function clearAll() {
+    ["broadcast","persistence","push"].forEach(col => {
+      const feed = document.getElementById("feed-" + col);
+      feed.innerHTML = '<div class="empty-feed"><div class="empty-icon">📭</div><span>Cleared. Waiting for events…</span></div>';
+    });
+    Object.assign(stats, { total:0, messages:0, ephemeral:0, presence:0, skipped:0, dbWrites:0 });
+    updateStats();
+    document.getElementById("totalCounter").textContent = "0 events";
+  }
+</script>
+</body>
+</html>
