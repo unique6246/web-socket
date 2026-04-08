@@ -1,5 +1,6 @@
 package com.example.websocket.config;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -10,13 +11,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Simple in-memory brute-force protection for login.
  * Blocks an IP after MAX_ATTEMPTS failures within WINDOW_SECONDS.
+ * Stale entries are cleaned up lazily on each check and also via a scheduled task
+ * to prevent unbounded memory growth from inactive IPs.
  */
 @Component
 public class LoginRateLimiter {
 
-    private static final int MAX_ATTEMPTS = 5;
-    private static final long WINDOW_SECONDS = 300; // 5 minutes
-    private static final long BLOCK_SECONDS  = 900; // 15 minutes after exceeding
+    private static final int  MAX_ATTEMPTS    = 5;
+    private static final long WINDOW_SECONDS  = 300;  // 5 minutes
+    private static final long BLOCK_SECONDS   = 900;  // 15 minutes after exceeding
 
     private record Attempt(AtomicInteger count, long windowStart, long blockedUntil) {}
 
@@ -27,7 +30,7 @@ public class LoginRateLimiter {
         if (a == null) return false;
         long now = Instant.now().getEpochSecond();
         if (a.blockedUntil() > now) return true;
-        // Block expired — reset if window also expired
+        // Block expired — remove if the window is also expired
         if (now - a.windowStart() > WINDOW_SECONDS) {
             attempts.remove(ip);
         }
@@ -55,5 +58,18 @@ public class LoginRateLimiter {
         if (a == null) return 0;
         long now = Instant.now().getEpochSecond();
         return Math.max(0, a.blockedUntil() - now);
+    }
+
+    /**
+     * Scheduled cleanup: remove entries whose block window AND failure window
+     * have both expired. Runs every 10 minutes to keep the map bounded.
+     */
+    @Scheduled(fixedDelay = 600_000)
+    public void cleanupExpiredEntries() {
+        long now = Instant.now().getEpochSecond();
+        attempts.entrySet().removeIf(e -> {
+            Attempt a = e.getValue();
+            return a.blockedUntil() < now && (now - a.windowStart()) > WINDOW_SECONDS;
+        });
     }
 }

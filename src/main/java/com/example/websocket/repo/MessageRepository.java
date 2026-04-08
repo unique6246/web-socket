@@ -21,6 +21,9 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     @Query("SELECT m FROM Message m WHERE m.chatRoom = :room AND m.isPinned = true AND m.isDeleted = false ORDER BY m.timestamp DESC")
     List<Message> findPinnedByRoom(@Param("room") ChatRoom room);
 
+    @Query("SELECT m FROM Message m WHERE m.chatRoom = :room AND m.isDeleted = false ORDER BY m.timestamp DESC")
+    List<Message> findLatestByRoom(@Param("room") ChatRoom room, Pageable pageable);
+
     @Query("SELECT m FROM Message m WHERE m.chatRoom = :room AND m.isDeleted = false AND LOWER(m.content) LIKE LOWER(CONCAT('%', :query, '%')) ORDER BY m.timestamp DESC")
     List<Message> searchInRoom(@Param("room") ChatRoom room, @Param("query") String query, Pageable pageable);
 }
