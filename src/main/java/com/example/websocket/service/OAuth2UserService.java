@@ -51,14 +51,18 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
         String picture = (String) attrs.get("avatar_url"); // GitHub
         if (picture == null) picture = (String) attrs.get("picture"); // Google
 
-        // Derive a unique username from provider + id
-        String baseUsername = provider + "_" + providerUserId;
+        // Derive username from the email prefix (e.g. praveenwppe@gmail.com → praveenwppe)
+        // Fall back to provider_id only when email is unavailable
+        String baseUsername;
+        if (email != null && email.contains("@")) {
+            baseUsername = email.substring(0, email.indexOf('@'))
+                               .replaceAll("[^a-zA-Z0-9_.-]", "_"); // sanitise illegal chars
+        } else {
+            baseUsername = provider + "_" + providerUserId;
+        }
         if (baseUsername.length() > 50) baseUsername = baseUsername.substring(0, 50);
 
-        boolean isNewUser = false;
         User user = null;
-
-        // 1. Try to find by provider + providerUserId (most reliable)
         if (email != null && !email.isBlank()) {
             var optByEmail = userRepository.findByEmail(email);
             if (optByEmail.isPresent()) {
@@ -78,7 +82,7 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
             // New OAuth user — create account
             user = new User();
             user.setUsername(generateUniqueUsername(baseUsername));
-            user.setPassword(""); // no password for OAuth users
+            user.setPassword(""); // no password — authenticated via OAuth provider
             user.setEmail(email);
             user.setDisplayName(name != null ? name : baseUsername);
             user.setAvatarUrl(picture);
@@ -90,7 +94,6 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
                     .orElseThrow(() -> new RuntimeException("USER role not found"));
             user.setRoles(Collections.singleton(userRole));
             user = userRepository.save(user);
-            isNewUser = true;
             log.info("[OAuth2] Created new user {} via {}", user.getUsername(), provider);
 
             // Send welcome email for new OAuth users

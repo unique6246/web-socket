@@ -2,6 +2,7 @@ package com.example.websocket.config;
 
 import com.example.websocket.JWT.JwtService;
 import com.example.websocket.service.OAuth2UserService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -18,6 +19,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -27,6 +29,15 @@ public class SecurityConfig {
     private final JwtService jwtService;
     private final OAuth2UserService oAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
+
+    /**
+     * Comma-separated list of allowed CORS origins.
+     * In development this defaults to localhost. In production, set this to
+     * your actual frontend domain(s) in application.properties:
+     *   app.cors.allowed-origins=https://chat.yourcompany.com
+     */
+    @Value("${app.cors.allowed-origins:http://localhost:8080,http://localhost:3000}")
+    private String allowedOrigins;
 
     public SecurityConfig(JwtService jwtService,
                           OAuth2UserService oAuth2UserService,
@@ -65,19 +76,20 @@ public class SecurityConfig {
                 .requestMatchers("/ws/**").permitAll()
                 // Protected page routes — must be authenticated
                 .requestMatchers("/api/v1/chat", "/api/v1/dashboard",
-                                  "/api/v1/profile",
+                                  "/api/v1/profile", "/api/v1/kafka-monitor",
                                   "/chat.html", "/dashboard.html",
-                                  "/profile.html").authenticated()
+                                  "/profile.html", "/kafka-monitor.html").authenticated()
                 // File uploads: any authenticated user
                 .requestMatchers("/api/files/**").hasAnyRole("USER", "ADMIN", "MODERATOR")
                 // Admin REST API only
                 .requestMatchers("/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/kafka-monitor/**").hasRole("ADMIN")
                 // Moderator + Admin REST API
                 .requestMatchers("/api/moderator/**").hasAnyRole("ADMIN", "MODERATOR")
                 // Authenticated REST endpoints
                 .requestMatchers("/api/auth/me", "/api/auth/change-password",
                                   "/api/auth/logout", "/api/auth/ws-ticket",
-                                  "/api/auth/update-profile").authenticated()
+                                  "/api/auth/add-password").authenticated()
                 // Everything else needs auth
                 .anyRequest().authenticated()
             )
@@ -116,11 +128,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        // Restrict to same origin — change to your actual domain in production
-        config.setAllowedOriginPatterns(List.of("*"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
-        config.setExposedHeaders(List.of("Authorization"));
+        // Use explicit origins — wildcard is not allowed when allowCredentials=true.
+        // Set app.cors.allowed-origins in application.properties for production.
+        List<String> origins = Arrays.asList(allowedOrigins.split(","));
+        config.setAllowedOrigins(origins.stream().map(String::trim).toList());
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Content-Type", "X-Requested-With"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
