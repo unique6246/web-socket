@@ -70,6 +70,13 @@ public class User implements Serializable {
     @Column(nullable = false)
     private boolean emailVerified = false;
 
+    /**
+     * True once the user has set a real password (via registration or set-password).
+     * False for OAuth-only users who haven't set a password yet.
+     */
+    @Column(nullable = false)
+    private boolean passwordSet = true;
+
     /** How many consecutive failed login attempts since last success */
     @Column(nullable = false)
     private int failedLoginAttempts = 0;
