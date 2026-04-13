@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob: https:; object-src 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss:; img-src 'self' data: blob: https:; object-src 'none'; frame-ancestors 'none';">
   <title>ChatApp</title>
   <link rel="stylesheet" href="/style.css"/>
 </head>
@@ -13,7 +13,7 @@
 
 <!-- ══════════════  TOP NAV  ══════════════ -->
 <nav class="topnav">
-  <span class="topnav-brand">💬 ChatApp</span>
+  <span class="topnav-brand">💬 ChatApp <span id="sidebarWsDot" class="sidebar-ws-dot disconnected" title="Sidebar connection: disconnected"></span></span>
   <div class="topnav-right">
     <button id="notifBtn" class="icon-btn notif-btn" title="Notifications">
       🔔
@@ -66,8 +66,8 @@
 
     <div id="emptyState" class="empty-state">
       <div class="empty-icon">💬</div>
-      <h2>Select a conversation</h2>
-      <p>Pick a user from <strong>People</strong> to start a DM,<br>or open a group from <strong>Groups</strong>.</p>
+      <h2>Start a conversation</h2>
+      <p>Pick someone from <strong>People</strong> to send a DM,<br>or open a <strong>Group</strong> to chat with the team.</p>
     </div>
 
     <div id="chatWindow" class="chat-window" style="display:none;">
@@ -239,8 +239,8 @@
     if (document.readyState !== "loading") {
       setupRoleUI();
       initTabs();
-      loadPeopleList();
-      loadMyRooms();
+      connectSidebarSocket();        // ← persistent global WS for presence/unread/notifications
+      loadPeopleList();              // chains loadMyRooms() after allUsers is ready
       loadUnreadNotifCount();
     }
   })();

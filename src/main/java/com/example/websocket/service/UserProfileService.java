@@ -83,14 +83,28 @@ public class UserProfileService {
     }
 
     /**
-     * Called automatically on WS disconnect and logout.
+     * Called automatically on WS disconnect.
      * Skips if the user has a manually-set status override (AWAY / DND / Appear Offline).
      */
     @Transactional
     public void setOffline(String username) {
         User u = userRepository.findByUsername(username);
         if (u == null) return;
-        if (u.isManualStatusOverride()) return;   // respect user's explicit choice
+        if (u.isManualStatusOverride()) return;   // respect user's explicit choice on WS disconnect
+        u.setStatus(UserStatus.OFFLINE);
+        u.setLastSeen(LocalDateTime.now());
+        userRepository.save(u);
+    }
+
+    /**
+     * Called on explicit logout. Always sets OFFLINE and clears any manual override
+     * so the user starts fresh next time they log in.
+     */
+    @Transactional
+    public void forceOffline(String username) {
+        User u = userRepository.findByUsername(username);
+        if (u == null) return;
+        u.setManualStatusOverride(false);
         u.setStatus(UserStatus.OFFLINE);
         u.setLastSeen(LocalDateTime.now());
         userRepository.save(u);

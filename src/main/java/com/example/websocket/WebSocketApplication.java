@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfig
 import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Arrays;
@@ -25,6 +26,7 @@ import java.util.List;
     RedisRepositoriesAutoConfiguration.class
 })
 @EnableAsync
+@EnableScheduling
 public class WebSocketApplication {
 
     public static void main(String[] args) {
@@ -54,22 +56,20 @@ public class WebSocketApplication {
             if (admin == null) {
                 admin = new User();
                 admin.setUsername("admin");
+                admin.setEmail("praveenwppe@gmail.com");
+                admin.setDisplayName("Admin");
+                admin.setBio("Platform administrator. Here to keep things running smoothly.");
+                admin.setPhone("+1 000 000 0000");
+                admin.setAvatarUrl("");
+                admin.setStatus(UserStatus.ONLINE);
+                admin.setEmailVerified(true);
+                admin.setPassword(passwordEncoder.encode("Admin@1234"));
+
+                if (admin.getRoles() == null) admin.setRoles(new HashSet<>());
+                boolean hasAdminRole = admin.getRoles().stream().anyMatch(r -> "ADMIN".equals(r.getName()));
+                if (!hasAdminRole) admin.getRoles().add(adminRole);
+                userRepository.save(admin);
             }
-
-            // ── Always ensure latest profile info ────────────────────────
-            admin.setEmail("admin@chatapp.com");
-            admin.setDisplayName("Admin");
-            admin.setBio("Platform administrator. Here to keep things running smoothly.");
-            admin.setPhone("+1 000 000 0000");
-            admin.setAvatarUrl(""); // set to a real Cloudinary URL if desired
-            admin.setStatus(UserStatus.ONLINE);
-            admin.setEmailVerified(true);
-            admin.setPassword(passwordEncoder.encode("Admin@1234"));
-
-            if (admin.getRoles() == null) admin.setRoles(new HashSet<>());
-            boolean hasAdminRole = admin.getRoles().stream().anyMatch(r -> "ADMIN".equals(r.getName()));
-            if (!hasAdminRole) admin.getRoles().add(adminRole);
-            userRepository.save(admin);
 
             System.out.println("==> Admin user ready: username=admin  email=" + admin.getEmail()
                     + "  displayName=" + admin.getDisplayName()

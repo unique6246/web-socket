@@ -2,11 +2,15 @@ package com.example.websocket.controller;
 
 import com.example.websocket.JWT.JwtService;
 import com.example.websocket.JWT.JwtUtil;
+import com.example.websocket.config.SocketConnectionHandler;
 import com.example.websocket.model.*;
 import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.*;
 import jakarta.servlet.http.HttpServletRequest;
+import org.json.JSONObject;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,13 +25,16 @@ public class ChatController {
     private final JwtService jwtService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final SocketConnectionHandler socketHandler;
 
     public ChatController(ChatRoomService chatRoomService, JwtService jwtService,
-                          JwtUtil jwtUtil, UserRepository userRepository) {
+                          JwtUtil jwtUtil, UserRepository userRepository,
+                          @Lazy SocketConnectionHandler socketHandler) {
         this.chatRoomService = chatRoomService;
         this.jwtService = jwtService;
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
+        this.socketHandler = socketHandler;
     }
 
     /** Create or join a plain named room (legacy) — returns safe DTO */
@@ -69,6 +76,23 @@ public class ChatController {
         memberSet.addAll(members);
 
         ChatRoom room = chatRoomService.createGroupRoom(groupName, new ArrayList<>(memberSet), currentUser);
+
+        // Push GROUP_CREATED to every member (including creator) so all sidebars
+        // update in real time without anyone needing to refresh the page.
+        JSONObject notification = new JSONObject();
+        notification.put("eventType",   "GROUP_CREATED");
+        notification.put("roomName",    room.getRoomName());
+        notification.put("displayName", room.getRoomName());
+        notification.put("createdBy",   currentUser);
+
+        for (String member : memberSet) {
+            try {
+                // Role differs: creator is ADMIN, others are MEMBER
+                notification.put("groupRole", member.equals(currentUser) ? "ADMIN" : "MEMBER");
+                socketHandler.pushToUser(member, notification);
+            } catch (Exception ignored) {}
+        }
+
         return ResponseEntity.ok(Map.of(
             "roomName",  room.getRoomName(),
             "type",      room.getType(),
@@ -95,10 +119,17 @@ public class ChatController {
 
     /** All users except caller — for the People tab. Includes profile fields. */
     @GetMapping("/users")
-    public ResponseEntity<List<Map<String, Object>>> listUsers(HttpServletRequest request) {
+    public ResponseEntity<List<Map<String, Object>>> listUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "200") int limit,
+            HttpServletRequest request) {
         String currentUser = extractUsername(request);
+        // Limit to sane page size to prevent full-table scans in production
+        int safeLimit = Math.min(Math.max(limit, 1), 500);
         List<Map<String, Object>> users = userRepository.findAll().stream()
                 .filter(u -> !u.getUsername().equals(currentUser))
+                .skip((long) page * safeLimit)
+                .limit(safeLimit)
                 .map(u -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("username",    u.getUsername());
@@ -113,16 +144,19 @@ public class ChatController {
 
     /** Rooms the caller belongs to */
     @GetMapping("/my-rooms")
-    public ResponseEntity<List<Map<String, String>>> myRooms(HttpServletRequest request) {
+    public ResponseEntity<List<Map<String, Object>>> myRooms(HttpServletRequest request) {
         String username = extractUsername(request);
         return ResponseEntity.ok(chatRoomService.getRoomsWithTypeByUserName(username));
     }
 
     /** Chat history (legacy — prefer /api/messages/room/{name}) */
     @GetMapping("/history/{roomName}")
+    @PreAuthorize("isAuthenticated()")
     @Transactional(readOnly = true)
     public List<Map<String, Object>> getRoomChatHistory(@PathVariable String roomName) {
+        // Hard cap at 100 messages — callers should use /api/messages/room/{name}?limit=50
         return chatRoomService.getMessagesByRoomName(roomName).stream()
+                .limit(100)
                 .map(m -> {
                     Map<String, Object> dto = new LinkedHashMap<>();
                     dto.put("id",          m.getId());
@@ -149,13 +183,19 @@ public class ChatController {
         return ResponseEntity.ok(Map.of("message", "Left room successfully"));
     }
 
-    /** Add a user to a group room */
+    /** Add a user to a group room — caller must be the group admin */
     @PostMapping("/rooms/{roomName}/add-member/{username}")
     public ResponseEntity<?> addMemberToGroup(@PathVariable String roomName,
-                                              @PathVariable String username) {
+                                              @PathVariable String username,
+                                              HttpServletRequest request) {
+        String caller = extractUsername(request);
         ChatRoom room = chatRoomService.getRoomDetails(roomName);
         if (!"GROUP".equals(room.getType()))
             return ResponseEntity.badRequest().body(Map.of("error", "Cannot add members to a DM room"));
+        // Only the group admin can add members
+        String callerRole = chatRoomService.getMyRoleInRoom(roomName, caller);
+        if (!"ADMIN".equals(callerRole))
+            return ResponseEntity.status(403).body(Map.of("error", "Only the group admin can add members"));
         chatRoomService.createOrUpdateChatRoom(roomName, username);
         return ResponseEntity.ok(Map.of("roomName", roomName, "addedUser", username));
     }
@@ -173,6 +213,8 @@ public class ChatController {
                                          ? cu.getUser().getDisplayName() : cu.getUser().getUsername());
                     m.put("avatarUrl",   cu.getUser().getAvatarUrl() != null
                                          ? cu.getUser().getAvatarUrl() : "");
+                    m.put("status",      cu.getUser().getStatus() != null
+                                         ? cu.getUser().getStatus().name() : "OFFLINE");
                     m.put("groupAdmin",  cu.isGroupAdmin());
                     return m;
                 })

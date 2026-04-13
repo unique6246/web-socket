@@ -34,11 +34,21 @@ async function requireAuthWithRole(requiredRoles, redirectUrl) {
         const res = await fetch("/api/auth/me", { credentials: 'include' });
         if (!res.ok) { clearSession(); window.location.href = "/api/v1/login"; return false; }
         const data = await res.json();
+
+        // Store session data first so it's available regardless of what happens next
         const roles = data.roles || [];
         sessionStorage.setItem("roles",       JSON.stringify(roles));
         sessionStorage.setItem("username",    data.username);
         sessionStorage.setItem("displayName", data.displayName || data.username);
         sessionStorage.setItem("avatarUrl",   data.avatarUrl || "");
+
+        // ── Email verification gate ───────────────────────────────────────
+        if (data.emailVerified === false) {
+            clearSession();
+            window.location.href = "/api/v1/login?unverified=true&email=" + encodeURIComponent(data.email || "");
+            return false;
+        }
+
         if (requiredRoles && requiredRoles.length > 0) {
             const hasRequired = requiredRoles.some(r => roles.includes(r));
             if (!hasRequired) { alert("Access denied."); window.location.href = redirectUrl || "/api/v1/login"; return false; }
@@ -128,7 +138,7 @@ function makeAvatarEl(username, avatarUrl, size) {
 //  Login / Register
 // ──────────────────────────────────────────────
 function handleLogin(e) {
-    e.preventDefault(); hideBanner("loginError");
+    e.preventDefault(); hideBanner("loginError"); hideBanner("loginSuccess");
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
     if (!username) return showBanner("loginError", "Username is required.");
@@ -136,7 +146,13 @@ function handleLogin(e) {
     const btn = e.target.querySelector("button[type='submit']");
     if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
     fetch("/api/auth/login", { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, password }) })
-    .then(r => { if (r.status === 429) return r.json().then(d => { throw new Error(d.error || "Too many attempts. Try later."); }); if (!r.ok) return r.json().then(d => { throw new Error(d.error || "Login failed"); }); return r.json(); })
+    .then(r => {
+        if (r.status === 429) return r.json().then(d => { throw Object.assign(new Error(d.error || "Too many requests from this network. Try later."), { status: 429 }); });
+        if (r.status === 423) return r.json().then(d => { throw Object.assign(new Error(d.error || "Account locked. Reset your password."), { status: 423 }); });
+        if (r.status === 403) return r.json().then(d => { throw Object.assign(new Error(d.error || "Access denied."), { status: 403, unverified: d.unverified, oauthOnly: d.oauthOnly, provider: d.provider }); });
+        if (!r.ok) return r.json().then(d => { throw Object.assign(new Error(d.error || "Login failed"), { attemptsRemaining: d.attemptsRemaining }); });
+        return r.json();
+    })
     .then(data => {
         sessionStorage.setItem("username",    data.username);
         sessionStorage.setItem("roles",       JSON.stringify(data.roles || []));
@@ -144,7 +160,49 @@ function handleLogin(e) {
         sessionStorage.setItem("avatarUrl",   data.avatarUrl || "");
         window.location.href = (data.roles || []).includes("ROLE_ADMIN") ? "/api/v1/dashboard" : "/api/v1/chat";
     })
-    .catch(err => { showBanner("loginError", err.message); if (btn) { btn.disabled = false; btn.textContent = "Sign In"; } });
+    .catch(err => {
+        let msg = err.message;
+        if (err.attemptsRemaining !== undefined) {
+            msg += ` (${err.attemptsRemaining} attempt${err.attemptsRemaining !== 1 ? 's' : ''} remaining before lockout)`;
+        }
+        if (err.oauthOnly) {
+            const provider = err.provider || "google";
+            const errEl = document.getElementById("loginError");
+            if (errEl) {
+                errEl.textContent = "";
+                const text = document.createTextNode(err.message + " ");
+                const link = document.createElement("a");
+                link.href = `/oauth2/authorization/${provider}`;
+                link.textContent = `Sign in with ${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+                link.style.cssText = "color:#4f46e5;text-decoration:underline;";
+                errEl.appendChild(text);
+                errEl.appendChild(link);
+                errEl.style.display = "block";
+            }
+            if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+            return;
+        }
+        if (err.unverified) {
+            // Build the error message safely using DOM — never use innerHTML with dynamic content
+            const errEl = document.getElementById("loginError");
+            if (errEl) {
+                errEl.textContent = "";
+                const text = document.createTextNode(msg + " ");
+                const link = document.createElement("a");
+                link.href = "#";
+                link.textContent = "Resend verification email";
+                link.style.cssText = "color:#4f46e5;text-decoration:underline;";
+                link.addEventListener("click", e => { e.preventDefault(); showResend?.(); });
+                errEl.appendChild(text);
+                errEl.appendChild(link);
+                errEl.style.display = "block";
+            }
+            if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+            return;
+        }
+        showBanner("loginError", msg);
+        if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+    });
 }
 
 function handleRegister(e) {
@@ -175,12 +233,13 @@ function handleRegister(e) {
 // ──────────────────────────────────────────────
 //  WebSocket state
 // ──────────────────────────────────────────────
-let socket          = null;
+let socket          = null;   // room-scoped WebSocket (chat messages)
+let sidebarSocket   = null;   // persistent global WebSocket (presence, unread, notifications)
 let currentRoomName = null;
 let currentRoomType = null;
 let currentRoomDisplay = null;
 let currentGroupRole   = null;
-const unreadCounts = {};
+const unreadCounts = {};  // roomName → count
 
 // Typing state
 let typingTimer = null;
@@ -239,12 +298,8 @@ async function markNotifRead(id, itemEl) {
             itemEl.classList.remove("notif-unread");
             itemEl.querySelector(".notif-mark-read")?.remove();
         }
-        // Decrement badge live
-        const badge = document.getElementById("notifBadge");
-        if (badge) {
-            const cur = parseInt(badge.textContent || "0", 10);
-            updateNotifBadge(Math.max(0, cur - 1));
-        }
+        // Re-fetch authoritative count instead of doing DOM arithmetic
+        loadUnreadNotifCount();
     } catch(e) {}
 }
 async function markAllNotifsRead() {
@@ -272,17 +327,34 @@ async function loadNotifications() {
             const item = document.createElement("div");
             item.className = "notif-item" + (n.isRead ? "" : " notif-unread");
             item.dataset.id = n.id;
-            item.innerHTML = `
-                <div class="notif-icon">${getNotifIcon(n.type)}</div>
-                <div class="notif-body">
-                    <div class="notif-content">${escapeHtml(n.content || "")}</div>
-                    <div class="notif-time">${n.createdAt ? formatRelativeTime(n.createdAt) : ""}</div>
-                </div>
-                ${!n.isRead ? `<button class="notif-mark-read" title="Mark read">✓</button>` : ""}`;
-            item.querySelector(".notif-mark-read")?.addEventListener("click", e => {
-                e.stopPropagation();
-                markNotifRead(n.id, item);
-            });
+
+            const iconDiv = document.createElement("div");
+            iconDiv.className = "notif-icon";
+            iconDiv.textContent = getNotifIcon(n.type);
+
+            const bodyDiv = document.createElement("div");
+            bodyDiv.className = "notif-body";
+            const contentDiv = document.createElement("div");
+            contentDiv.className = "notif-content";
+            contentDiv.textContent = n.content || "";
+            const timeDiv = document.createElement("div");
+            timeDiv.className = "notif-time";
+            timeDiv.textContent = n.createdAt ? formatRelativeTime(n.createdAt) : "";
+            bodyDiv.appendChild(contentDiv);
+            bodyDiv.appendChild(timeDiv);
+
+            item.appendChild(iconDiv);
+            item.appendChild(bodyDiv);
+
+            if (!n.isRead) {
+                const markBtn = document.createElement("button");
+                markBtn.className = "notif-mark-read";
+                markBtn.title = "Mark read";
+                markBtn.textContent = "✓";
+                markBtn.addEventListener("click", e => { e.stopPropagation(); markNotifRead(n.id, item); });
+                item.appendChild(markBtn);
+            }
+
             list.appendChild(item);
         });
     } catch(e) { list.innerHTML = '<div class="members-loading">Failed to load notifications.</div>'; }
@@ -337,7 +409,12 @@ function switchTab(tabName) {
 let allUsers = [];
 
 function loadPeopleList() {
-    fetchWithAuth("/api/chat/users").then(r => r.json()).then(users => { allUsers = users; renderPeopleList(users); }).catch(console.error);
+    fetchWithAuth("/api/chat/users").then(r => r.json()).then(users => {
+        allUsers = users;
+        renderPeopleList(users);
+        // Load my rooms AFTER allUsers is populated so DM status dots are accurate
+        loadMyRooms();
+    }).catch(console.error);
 }
 function renderPeopleList(users) {
     const list = document.getElementById("peopleList"); if (!list) return;
@@ -345,12 +422,23 @@ function renderPeopleList(users) {
     if (!users || users.length === 0) { list.innerHTML = '<span class="muted-hint">No other users yet.</span>'; return; }
     users.forEach(u => {
         const item = document.createElement("div");
-        item.className = "room-item user-item"; item.dataset.username = u.username;
+        item.className = "room-item user-item";
+        item.dataset.username = u.username;
+        const statusCls = (u.status || 'OFFLINE').toLowerCase();
+        const statusLabel = { online:"Online", away:"Away", dnd:"Do Not Disturb", offline:"Offline" }[statusCls] || statusCls;
         const avHtml = u.avatarUrl
-            ? `<img src="${escapeHtml(u.avatarUrl)}" class="user-avatar" style="object-fit:cover;" alt="${escapeHtml(u.username)}" onerror="this.outerHTML='<div class=user-avatar>${escapeHtml(u.username.charAt(0).toUpperCase())}</div>'">`
-            : `<div class="user-avatar">${escapeHtml(u.username.charAt(0).toUpperCase())}</div>`;
-        const statusDot = `<span class="status-dot ${(u.status||'OFFLINE').toLowerCase()}" title="${u.status||'Offline'}"></span>`;
-        item.innerHTML = `${avHtml}<span class="room-item-name">${escapeHtml(u.displayName || u.username)}</span>${statusDot}<span class="room-badge" style="display:none;"></span>`;
+            ? `<img src="${escapeHtml(u.avatarUrl)}" class="user-avatar" style="object-fit:cover;" alt="${escapeHtml(u.username)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : "";
+        const avFallback = `<div class="user-avatar" ${u.avatarUrl ? 'style="display:none;"' : ""}>${escapeHtml(u.username.charAt(0).toUpperCase())}</div>`;
+        item.innerHTML = `
+            ${avHtml}${avFallback}
+            <div class="room-item-body">
+                <div class="room-item-top">
+                    <span class="room-item-name">${escapeHtml(u.displayName || u.username)}</span>
+                    <span class="status-dot ${statusCls}" title="${statusLabel}"></span>
+                </div>
+                <span class="room-item-preview" style="color:#94a3b8;font-size:.77em;">${statusLabel}</span>
+            </div>`;
         item.addEventListener("click", () => openDm(u.username));
         list.appendChild(item);
     });
@@ -376,13 +464,35 @@ function openDm(otherUsername) {
 function loadMyRooms() {
     fetchWithAuth("/api/chat/my-rooms").then(r => r.json()).then(rooms => {
         rooms.forEach(room => {
-            if (room.type === "DM") ensureRoomInList("dmList", room.roomName, dmDisplayName(room.roomName), "DM", null);
-            else ensureRoomInList("groupList", room.roomName, room.roomName, "GROUP", room.groupRole || "MEMBER");
+            if (room.type === "DM") {
+                const displayName = dmDisplayName(room.roomName);
+                ensureRoomInList("dmList", room.roomName, displayName, "DM", null);
+            } else {
+                ensureRoomInList("groupList", room.roomName, room.roomName, "GROUP", room.groupRole || "MEMBER");
+            }
+            // Show last-message preview if the API returns one
+            if (room.lastMessage) {
+                const item = document.querySelector(`.room-item[data-room="${CSS.escape(room.roomName)}"]`);
+                if (item) {
+                    const preview = item.querySelector(".room-item-preview");
+                    if (preview) {
+                        const text = room.lastMessage.length > 45 ? room.lastMessage.substring(0, 45) + "…" : room.lastMessage;
+                        preview.textContent = text;
+                        preview.dataset.lastSnippet = text;
+                    }
+                }
+            }
+            // Restore any persisted unread counts (server-provided)
+            if (room.unreadCount > 0) {
+                unreadCounts[room.roomName] = room.unreadCount;
+                updateBadge(room.roomName);
+            }
         });
         ["dmList","groupList"].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.querySelector(".room-item")) el.innerHTML = `<span class="muted-hint">${id==="dmList"?"No DMs yet.":"No groups yet."}</span>`;
         });
+        updateTabBadge();
     }).catch(console.error);
 }
 function dmDisplayName(roomName) {
@@ -395,16 +505,31 @@ function ensureRoomInList(listId, roomName, displayName, type, groupRole) {
     if (list.querySelector(`[data-room="${CSS.escape(roomName)}"]`)) return;
     const item = document.createElement("div");
     item.className = "room-item"; item.dataset.room = roomName; item.dataset.groupRole = groupRole || "";
-    // For DMs, tag the other user's username so presence events can find it
     if (type === "DM") item.dataset.username = displayName;
-    // Use actual known status from allUsers if available; default to offline
-    let statusDot = "";
+
+    // Read live status from allUsers (populated before loadMyRooms runs)
+    let statusDotHtml = "";
     if (type === "DM") {
         const knownUser = allUsers.find(u => u.username === displayName);
         const statusCls = knownUser ? (knownUser.status || 'OFFLINE').toLowerCase() : 'offline';
-        statusDot = `<span class="status-dot ${statusCls}" title="${statusCls.charAt(0).toUpperCase()+statusCls.slice(1)}"></span>`;
+        const statusLabel = { online:"Online", away:"Away", dnd:"Do Not Disturb", offline:"Offline" }[statusCls] || statusCls;
+        statusDotHtml = `<span class="status-dot ${statusCls}" title="${statusLabel}"></span>`;
     }
-    item.innerHTML = `<div class="user-avatar ${type==='GROUP'?'group-av':''}">${type==="GROUP"?"🏠":escapeHtml(displayName.charAt(0).toUpperCase())}</div><span class="room-item-name">${escapeHtml(displayName)}</span>${statusDot}<span class="room-badge" style="display:none;"></span>`;
+
+    const avatarHtml = type === "GROUP"
+        ? `<div class="user-avatar group-av">🏠</div>`
+        : `<div class="user-avatar">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
+
+    item.innerHTML = `
+        ${avatarHtml}
+        <div class="room-item-body">
+            <div class="room-item-top">
+                <span class="room-item-name">${escapeHtml(displayName)}</span>
+                ${statusDotHtml}
+                <span class="room-badge" style="display:none;"></span>
+            </div>
+            <span class="room-item-preview"></span>
+        </div>`;
     item.addEventListener("click", () => switchRoom(roomName, type, displayName, item.dataset.groupRole || null));
     list.appendChild(item);
 }
@@ -414,19 +539,60 @@ function ensureRoomInList(listId, roomName, displayName, type, groupRole) {
 // ──────────────────────────────────────────────
 function setActiveItem(roomName) {
     document.querySelectorAll(".room-item").forEach(el => el.classList.toggle("active", el.dataset.room===roomName||el.dataset.username===roomName));
-    unreadCounts[roomName] = 0; updateBadge(roomName);
+    unreadCounts[roomName] = 0;
+    updateBadge(roomName);
+    updateTabBadge();   // recalculate tab-level badge after clearing this room
 }
 function incrementUnread(roomName) {
     if (roomName === currentRoomName) return;
-    unreadCounts[roomName] = (unreadCounts[roomName] || 0) + 1; updateBadge(roomName);
+    unreadCounts[roomName] = (unreadCounts[roomName] || 0) + 1;
+    updateBadge(roomName);
+    updateTabBadge();
 }
 function updateBadge(key) {
     const item = document.querySelector(`.room-item[data-room="${CSS.escape(key)}"], .room-item[data-username="${CSS.escape(key)}"]`);
     if (!item) return;
-    const badge = item.querySelector(".room-badge"), count = unreadCounts[key] || 0;
+    const badge = item.querySelector(".room-badge");
+    if (!badge) return;
+    const count = unreadCounts[key] || 0;
     badge.textContent = count > 99 ? "99+" : count;
     badge.style.display = count > 0 ? "inline-flex" : "none";
     item.classList.toggle("has-unread", count > 0);
+}
+
+/**
+ * Recomputes the total unread count for each tab (DMs / Groups)
+ * and renders a numeric badge directly on the tab button.
+ */
+function updateTabBadge() {
+    // DMs tab — sum unread for all dm__ rooms
+    let dmTotal = 0, groupTotal = 0;
+    document.querySelectorAll("#dmList .room-item[data-room]").forEach(el => {
+        dmTotal += unreadCounts[el.dataset.room] || 0;
+    });
+    document.querySelectorAll("#groupList .room-item[data-room]").forEach(el => {
+        groupTotal += unreadCounts[el.dataset.room] || 0;
+    });
+
+    _setTabBadge("dms",    dmTotal);
+    _setTabBadge("groups", groupTotal);
+}
+function _setTabBadge(tabName, count) {
+    const stab = document.querySelector(`.stab[data-tab="${tabName}"]`);
+    if (!stab) return;
+    let badge = stab.querySelector(".stab-unread-badge");
+    if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "stab-unread-badge room-badge";
+        badge.style.cssText = "margin-left:5px;font-size:.65em;padding:1px 5px;";
+        stab.appendChild(badge);
+    }
+    if (count > 0) {
+        badge.textContent = count > 99 ? "99+" : count;
+        badge.style.display = "inline-flex";
+    } else {
+        badge.style.display = "none";
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -489,7 +655,64 @@ function applyGroupRoleUI(role) {
 }
 
 // ──────────────────────────────────────────────
-//  WebSocket
+//  Sidebar (global) WebSocket — persistent, receives PRESENCE / UNREAD / NOTIF
+// ──────────────────────────────────────────────
+let _sidebarReconnectDelay = 1000;
+let _sidebarReconnectTimer = null;
+
+function connectSidebarSocket() {
+    if (sidebarSocket && (sidebarSocket.readyState === WebSocket.OPEN || sidebarSocket.readyState === WebSocket.CONNECTING)) return;
+    fetch("/api/auth/ws-ticket", { method: "POST", credentials: "include" })
+        .then(r => { if (!r.ok) throw new Error("ticket"); return r.json(); })
+        .then(data => {
+            const proto = location.protocol === "https:" ? "wss" : "ws";
+            sidebarSocket = new WebSocket(
+                `${proto}://${location.host}/ws?ticket=${encodeURIComponent(data.ticket)}&roomName=__sidebar__`
+            );
+            sidebarSocket.onopen = () => {
+                _sidebarReconnectDelay = 1000;
+                clearTimeout(_sidebarReconnectTimer);
+                const dot = document.getElementById("sidebarWsDot");
+                if (dot) { dot.className = "sidebar-ws-dot"; dot.title = "Sidebar connection: live"; }
+            };
+            sidebarSocket.onmessage = ev => {
+                try { handleSidebarMessage(JSON.parse(ev.data)); } catch(e) {}
+            };
+            sidebarSocket.onclose = () => {
+                sidebarSocket = null;
+                const dot = document.getElementById("sidebarWsDot");
+                if (dot) { dot.className = "sidebar-ws-dot disconnected"; dot.title = "Sidebar connection: reconnecting…"; }
+                _sidebarReconnectTimer = setTimeout(() => {
+                    _sidebarReconnectDelay = Math.min(_sidebarReconnectDelay * 2, 30000);
+                    connectSidebarSocket();
+                }, _sidebarReconnectDelay);
+            };
+            sidebarSocket.onerror = () => { sidebarSocket?.close(); };
+        })
+        .catch(() => {
+            _sidebarReconnectTimer = setTimeout(connectSidebarSocket, _sidebarReconnectDelay);
+        });
+}
+
+/**
+ * Handles events that arrive on the persistent sidebar socket.
+ * These are GLOBAL events — not tied to a specific room.
+ */
+function handleSidebarMessage(msg) {
+    const type = msg.eventType || "";
+    if (type === "PRESENCE")     { handlePresenceEvent(msg.sender, msg.presenceStatus); return; }
+    if (type === "UNREAD_COUNT") { handleUnreadCountEvent(msg); return; }
+    if (type === "NOTIFICATION") { handleNotificationEvent(msg); return; }
+    if (type === "GROUP_CREATED") { handleGroupCreatedEvent(msg); return; }
+    // MESSAGE events also arrive here for non-active rooms — update preview + badge
+    if (type === "MESSAGE" && msg.roomName && msg.roomName !== currentRoomName) {
+        const snippet = msg.message || (msg.fileUrl ? `📎 ${msg.fileName || "File"}` : "");
+        updateSidebarItem(msg.roomName, snippet, msg.sender, false);
+    }
+}
+
+// ──────────────────────────────────────────────
+//  Room WebSocket
 // ──────────────────────────────────────────────
 function connectWebSocket(roomName) {
     fetch("/api/auth/ws-ticket", { method: 'POST', credentials: 'include' })
@@ -511,40 +734,42 @@ function connectWebSocket(roomName) {
 function handleWsMessage(msg) {
     const type = msg.eventType || "MESSAGE";
 
+    // ── Global events belong to the sidebar socket only ───────────────────────
+    // The sidebar socket handles these for the entire session. Processing them
+    // here too would double-count badges and notifications.
+    if (type === "PRESENCE" || type === "NOTIFICATION" ||
+        type === "UNREAD_COUNT" || type === "GROUP_CREATED") return;
+
     if (type === "TYPING") {
-        handleTypingEvent(msg.sender, msg.isTyping, msg.roomName); return;
+        handleTypingEvent(msg.sender, msg.isTyping, msg.roomName);
+        // Show "typing…" as a transient preview in the sidebar DM item
+        if (msg.roomName !== currentRoomName && msg.isTyping) {
+            const item = document.querySelector(`.room-item[data-room="${CSS.escape(msg.roomName)}"]`);
+            const preview = item?.querySelector(".room-item-preview");
+            if (preview) {
+                preview.textContent = `${msg.sender} is typing…`;
+                preview.classList.add("preview-typing");
+                clearTimeout(preview._typingTimer);
+                preview._typingTimer = setTimeout(() => {
+                    preview.classList.remove("preview-typing");
+                    preview.textContent = preview.dataset.lastSnippet || "";
+                }, 4000);
+            }
+        }
+        return;
     }
-    if (type === "PRESENCE") {
-        handlePresenceEvent(msg.sender, msg.presenceStatus); return;
-    }
-    if (type === "NOTIFICATION") {
-        handleNotificationEvent(msg); return;
-    }
-    if (type === "UNREAD_COUNT") {
-        handleUnreadCountEvent(msg); return;
-    }
+
     if (type === "MESSAGE_ID_ASSIGN") {
-        // The persistence consumer saved the message and sent back the DB id.
-        // Patch the most recent unidentified bubble from this sender so that
-        // reply / react / edit / delete work without a page refresh.
         const allBubbles = document.querySelectorAll(".bubble:not([data-id])");
         for (let i = allBubbles.length - 1; i >= 0; i--) {
             const b = allBubbles[i];
             const group = b.closest(".msg-group");
             const senderEl = group?.querySelector(".group-sender");
             if (!senderEl) continue;
-            const senderName = senderEl.textContent;
-            const senderMatch = senderName === msg.sender
-                || senderName === (getDisplayName() || "You");
-            if (!senderMatch) continue;
-
-            // For text bubbles, also verify content matches
-            const textEl = b.querySelector(".bubble-text-content");
-            if (textEl) {
-                if (textEl.textContent !== (msg.content || "")) continue;
+            const senderName = senderEl.textContent.trim();
+            if (senderName === msg.sender || senderName === (getDisplayName() || "You")) {
+                b.dataset.id = msg.messageId; break;
             }
-            b.dataset.id = msg.messageId;
-            break;
         }
         return;
     }
@@ -564,43 +789,89 @@ function handleWsMessage(msg) {
         if (el) { el.classList.add("deleted-bubble"); el.innerHTML = '<em class="deleted-text">Message deleted</em>'; }
         return;
     }
-    if (type === "REACTION") {
-        refreshReactions(msg.messageId); return;
-    }
+    if (type === "REACTION") { refreshReactions(msg.messageId); return; }
     if (type === "PIN") {
         const el = document.querySelector(`.bubble[data-id="${msg.messageId}"]`);
-        if (el) {
-            if (msg.isPinned !== undefined) {
-                el.classList.toggle("pinned-bubble", !!msg.isPinned);
-            } else {
-                el.classList.toggle("pinned-bubble");
-            }
-        }
+        if (el) el.classList.toggle("pinned-bubble", msg.isPinned !== undefined ? !!msg.isPinned : !el.classList.contains("pinned-bubble"));
         return;
     }
+
     // Default: regular MESSAGE
     if (msg.roomName === currentRoomName) {
         appendLiveMessage(msg);
-    } else {
-        incrementUnread(msg.roomName);
-        // UNREAD_COUNT for the current user is already pushed server-side,
-        // but also bump the badge here for instant feedback
     }
+    // Update sidebar preview text for any room (active or not).
+    // Badge increment is handled exclusively by the UNREAD_COUNT event
+    // from the sidebar socket — do NOT call incrementUnread here.
+    const snippet = msg.message || (msg.fileUrl ? `📎 ${msg.fileName || "File"}` : "");
+    if (snippet) updateSidebarItem(msg.roomName, snippet, msg.sender, false);
+}
+
+/**
+ * Updates the sidebar item for a room: sets the preview text, bumps the badge
+ * (only if increment=true), stores the snippet for restoring after typing preview,
+ * and floats the item to the top of its list.
+ */
+function updateSidebarItem(roomName, snippet, senderUsername, increment) {
+    if (!roomName) return;
+    const isDm = roomName.startsWith("dm__");
+    // Auto-create sidebar entry if it doesn't exist yet (new DM from another user)
+    if (isDm) {
+        const otherUser = roomName.replace(/^dm__/, "").split("__").find(p => p !== getUsername()) || roomName;
+        ensureRoomInList("dmList", roomName, otherUser, "DM", null);
+    }
+    const item = document.querySelector(`.room-item[data-room="${CSS.escape(roomName)}"]`);
+    if (!item) return;
+
+    // Update preview snippet
+    const preview = item.querySelector(".room-item-preview");
+    if (preview) {
+        const text = snippet.length > 45 ? snippet.substring(0, 45) + "…" : snippet;
+        preview.dataset.lastSnippet = text;
+        if (!preview.classList.contains("preview-typing")) preview.textContent = text;
+    }
+
+    // Bump unread badge only for non-active rooms
+    if (increment && roomName !== currentRoomName) {
+        incrementUnread(roomName);
+    }
+
+    // Float item to top of its list (newest-activity first)
+    const list = item.parentElement;
+    if (list && list.firstChild !== item) list.prepend(item);
+
+    // Flash the tab badge for DMs or Groups
+    updateTabBadge();
 }
 
 // ── Presence ─────────────────────────────────────────────────────────────────
 function handlePresenceEvent(sender, status) {
     const s = (status || "offline").toLowerCase();
     const cls = `status-dot ${s}`;
-    const label = s.charAt(0).toUpperCase() + s.slice(1);
+    const label = { online:"Online", away:"Away", dnd:"Do Not Disturb", offline:"Offline" }[s] || s;
 
-    // ── 1. Every element with data-username="sender" ──────────────────────────
+    // ── 1. Keep allUsers[] in sync so every future read sees live status ──────
+    const u = allUsers.find(u => u.username === sender);
+    if (u) u.status = s.toUpperCase();
+
+    // ── 2. Every sidebar/people-list element with data-username="sender" ──────
     document.querySelectorAll(`[data-username="${CSS.escape(sender)}"]`).forEach(el => {
         const dot = el.querySelector(".status-dot");
         if (dot) { dot.className = cls; dot.title = label; }
+        // Update the sub-text preview line in the People tab (shows status label)
+        const preview = el.querySelector(".room-item-preview");
+        if (preview && el.classList.contains("user-item")) {
+            preview.textContent = label;
+        }
     });
 
-    // ── 2. DM chat header sub-line (only when that DM is open) ───────────────
+    // ── 3. Members panel rows (stays live while panel is open) ────────────────
+    document.querySelectorAll(`#membersPanelList .member-row[data-username="${CSS.escape(sender)}"]`).forEach(row => {
+        const dot = row.querySelector(".status-dot");
+        if (dot) { dot.className = cls; dot.title = label; }
+    });
+
+    // ── 4. DM chat header sub-line (only when that DM is open) ───────────────
     if (currentRoomType === "DM") {
         const otherUser = dmDisplayName(currentRoomName);
         if (otherUser === sender) {
@@ -616,19 +887,33 @@ function handlePresenceEvent(sender, status) {
 
 // ── Real-time Notifications ───────────────────────────────────────────────────
 function handleNotificationEvent(msg) {
-    // 1. Bump the bell badge
-    const badge = document.getElementById("notifBadge");
-    if (badge) {
-        const current = parseInt(badge.textContent || "0", 10);
-        const next = msg.unreadCount !== undefined ? Number(msg.unreadCount) : current + 1;
-        badge.textContent = next;
-        badge.style.display = next > 0 ? "flex" : "none";
+    // ── 1. Bell badge — use authoritative DB count from server ────────────────
+    if (msg.unreadCount !== undefined && msg.unreadCount !== null) {
+        updateNotifBadge(msg.unreadCount);
+    } else {
+        const badge = document.getElementById("notifBadge");
+        if (badge) {
+            const current = parseInt(badge.textContent || "0", 10);
+            updateNotifBadge(current + 1);
+        }
     }
 
-    // 2. Show a toast
-    showNotifToast(msg.notifType, msg.content);
+    // ── 2. Sidebar room badge — for DM MESSAGE notifications ─────────────────
+    // The NOTIFICATION event is the only unread signal sent for DM rooms
+    // (UNREAD_COUNT is only sent for groups). If this notification is a DM
+    // message and carries the roomName, increment the sidebar badge now.
+    if (msg.type === "MESSAGE" && msg.roomName && msg.roomName !== currentRoomName) {
+        // Build preview: "sender: message" — extract sender from content "X sent you a message"
+        const senderMatch = msg.content ? msg.content.match(/^(.+?) sent you/) : null;
+        const senderName  = senderMatch ? senderMatch[1] : "";
+        const snippet     = senderName ? `${senderName}: New message` : (msg.content || "");
+        updateSidebarItem(msg.roomName, snippet, senderName, true);
+    }
 
-    // 3. If the notifications panel is open, prepend the new item
+    // ── 3. Toast notification ─────────────────────────────────────────────────
+    showNotifToast(msg.type, msg.content);
+
+    // ── 4. If the notifications panel is open, prepend live ──────────────────
     const panel = document.getElementById("notifPanel");
     if (panel && panel.style.display !== "none") {
         prependNotifItem(msg);
@@ -636,9 +921,56 @@ function handleNotificationEvent(msg) {
 }
 
 function handleUnreadCountEvent(msg) {
-    // Server tells us a room we're NOT viewing got a new message — bump its badge
-    if (msg.roomName && msg.roomName !== currentRoomName) {
-        incrementUnread(msg.roomName);
+    if (!msg.roomName || msg.roomName === currentRoomName) return;
+
+    // Build the preview snippet: "sender: message text" format like WhatsApp/Slack
+    let snippet = msg.lastMessage || "";
+    if (msg.sender && snippet) {
+        const senderLabel = msg.sender === getUsername() ? "You" : msg.sender;
+        snippet = `${senderLabel}: ${snippet}`;
+    }
+
+    // updateSidebarItem handles: auto-create sidebar entry, set preview text,
+    // increment the room badge by 1, float item to top, update tab badge
+    updateSidebarItem(msg.roomName, snippet, msg.sender, true);
+}
+
+/**
+ * Called when the server pushes GROUP_CREATED to all group members.
+ * Adds the group to the sidebar immediately without a page refresh.
+ */
+function handleGroupCreatedEvent(msg) {
+    if (!msg.roomName) return;
+    const role = msg.groupRole || "MEMBER";
+    const isCreator = msg.createdBy === getUsername();
+
+    // Add to the Groups tab sidebar
+    ensureRoomInList("groupList", msg.roomName, msg.displayName || msg.roomName, "GROUP", role);
+
+    // Update the preview line to show who created it
+    const item = document.querySelector(`.room-item[data-room="${CSS.escape(msg.roomName)}"]`);
+    if (item) {
+        const preview = item.querySelector(".room-item-preview");
+        if (preview) {
+            preview.textContent = isCreator ? "You created this group" : `${msg.createdBy} added you`;
+            preview.dataset.lastSnippet = preview.textContent;
+        }
+        // Highlight with a brief flash so the user notices the new entry
+        item.style.transition = "background .4s";
+        item.style.background = "rgba(99,102,241,.18)";
+        setTimeout(() => { item.style.background = ""; }, 2000);
+    }
+
+    updateTabBadge();
+
+    // For non-creators: show a toast notification and auto-switch to Groups tab
+    if (!isCreator) {
+        showNotifToast("ROOM_INVITE", `${msg.createdBy} added you to "${msg.displayName || msg.roomName}"`);
+        // Gently switch to the Groups tab so the user sees the new entry
+        const groupsTab = document.querySelector(".stab[data-tab='groups']");
+        if (groupsTab && !groupsTab.classList.contains("active")) {
+            switchTab("groups");
+        }
     }
 }
 
@@ -646,14 +978,21 @@ function handleUnreadCountEvent(msg) {
 function showNotifToast(type, content) {
     const icons = {
         FRIEND_REQUEST: "👤", FRIEND_ACCEPTED: "🤝",
-        MESSAGE_MENTION: "💬", ROOM_INVITE: "🏠"
+        MENTION: "💬", ROOM_INVITE: "🏠", MESSAGE: "💬"
     };
     const icon = icons[type] || "🔔";
     const toast = document.createElement("div");
     toast.className = "notif-toast";
-    toast.innerHTML = `<span class="notif-toast-icon">${icon}</span><span class="notif-toast-text">${escapeHtml(content || "New notification")}</span>`;
+    // Use DOM text node — never innerHTML with user content
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "notif-toast-icon";
+    iconSpan.textContent = icon;
+    const textSpan = document.createElement("span");
+    textSpan.className = "notif-toast-text";
+    textSpan.textContent = content || "New notification";
+    toast.appendChild(iconSpan);
+    toast.appendChild(textSpan);
     document.body.appendChild(toast);
-    // Animate in
     requestAnimationFrame(() => toast.classList.add("notif-toast-show"));
     setTimeout(() => {
         toast.classList.remove("notif-toast-show");
@@ -671,17 +1010,27 @@ function prependNotifItem(msg) {
     const item = document.createElement("div");
     item.className = "notif-item notif-unread";
     item.dataset.id = msg.notificationId || "";
-    item.innerHTML = `
-        <div class="notif-icon">${getNotifIcon(msg.notifType)}</div>
-        <div class="notif-body">
-            <div class="notif-content">${escapeHtml(msg.content || "")}</div>
-            <div class="notif-time">just now</div>
-        </div>
-        <button class="notif-mark-read" title="Mark read">✓</button>`;
-    item.querySelector(".notif-mark-read")?.addEventListener("click", e => {
-        e.stopPropagation();
-        markNotifRead(msg.notificationId, item);
-    });
+    const iconDiv = document.createElement("div");
+    iconDiv.className = "notif-icon";
+    iconDiv.textContent = getNotifIcon(msg.type);
+    const bodyDiv = document.createElement("div");
+    bodyDiv.className = "notif-body";
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "notif-content";
+    contentDiv.textContent = msg.content || "";
+    const timeDiv = document.createElement("div");
+    timeDiv.className = "notif-time";
+    timeDiv.textContent = "just now";
+    bodyDiv.appendChild(contentDiv);
+    bodyDiv.appendChild(timeDiv);
+    const markBtn = document.createElement("button");
+    markBtn.className = "notif-mark-read";
+    markBtn.title = "Mark read";
+    markBtn.textContent = "✓";
+    markBtn.addEventListener("click", e => { e.stopPropagation(); markNotifRead(msg.notificationId, item); });
+    item.appendChild(iconDiv);
+    item.appendChild(bodyDiv);
+    item.appendChild(markBtn);
     list.prepend(item);
 }
 
@@ -708,7 +1057,9 @@ function sendMessage() {
     const text = input.value.trim();
     if (!text || !currentRoomName) return;
     if (!socket || socket.readyState !== WebSocket.OPEN) { showBanner("roomError","Not connected."); return; }
-    const payload = { sender: getUsername(), room: currentRoomName, message: text };
+    // Do NOT include sender — the backend reads it from the authenticated WS session,
+    // never from the client payload (prevents spoofing).
+    const payload = { room: currentRoomName, message: text, eventType: "MESSAGE" };
     if (replyToMsg) payload.replyToMessageId = replyToMsg.id;
     socket.send(JSON.stringify(payload));
     input.value = ""; input.focus();
@@ -821,8 +1172,8 @@ function appendLiveMessage(msg) {
     document.getElementById("messages").querySelector(".no-msgs-hint")?.remove();
     if (dl !== lastDate) { appendDateSep(dl); lastDate = dl; lastSender = null; lastGroupEl = null; }
 
-    // Live WS messages use fileUrl presence + fileType MIME to determine type
-    const hasFile = !!(msg.fileUrl || msg.fileUrl);
+    // Live WS messages: use fileUrl presence + fileType MIME to determine type
+    const hasFile = !!msg.fileUrl;
     const mimeType = msg.fileType || "";
     const isImage  = hasFile && mimeType.toLowerCase().startsWith("image/");
     const type     = hasFile ? (isImage ? "IMAGE" : "FILE") : "TEXT";
@@ -831,6 +1182,7 @@ function appendLiveMessage(msg) {
         appendFileBubble(msg.sender, msg.fileUrl, msg.fileName, msg.fileType, isSelf, ts, msg.id, type, msg.message || null);
         lastSender = null; lastGroupEl = null;
     } else {
+        // Server broadcasts text as "message" field for live events
         appendTextBubble(msg.sender, msg.message, isSelf, ts, msg.id, false, msg.replyTo || null);
     }
     scrollToBottom();
@@ -1104,7 +1456,18 @@ function handleFileUpload(e) {
     const file = e.target.files[0]; if(!file) return;
     const fd = new FormData(); fd.append("file", file);
     fetchWithAuth("/api/files/upload", { method:"POST", body:fd })
-    .then(r=>r.json()).then(data => { if(socket?.readyState===WebSocket.OPEN) socket.send(JSON.stringify({ sender:getUsername(), room:currentRoomName, fileUrl:data.fileUrl, fileName:data.fileName, fileType:data.type })); })
+    .then(r=>r.json()).then(data => {
+        if(socket?.readyState===WebSocket.OPEN) {
+            // Do NOT include sender — backend reads it from the authenticated WS session.
+            socket.send(JSON.stringify({
+                eventType: "MESSAGE",
+                room:      currentRoomName,
+                fileUrl:   data.fileUrl,
+                fileName:  data.fileName,
+                fileType:  data.fileType   // was data.type — wrong field name
+            }));
+        }
+    })
     .catch(err=>showBanner("roomError","Upload failed: "+err.message));
     e.target.value="";
 }
@@ -1170,14 +1533,40 @@ function submitCreateGroup() {
     const groupName = document.getElementById("groupNameInput").value.trim();
     const description = document.getElementById("groupDescInput").value.trim();
     const errEl = document.getElementById("groupModalError"); errEl.style.display="none";
+    const createBtn = document.getElementById("createGroupBtn");
     if (!groupName) { errEl.textContent="Group name is required."; errEl.style.display="block"; return; }
     if (selectedMembers.size === 0) { errEl.textContent="Select at least one member."; errEl.style.display="block"; return; }
-    fetchWithAuth("/api/chat/rooms/group", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ groupName, description, members: [...selectedMembers] }) })
-    .then(r=>r.json()).then(data => {
-        closeGroupModal(); switchTab("groups");
-        ensureRoomInList("groupList", data.roomName, data.roomName, "GROUP", data.groupRole || "ADMIN");
-        switchRoom(data.roomName, "GROUP", data.roomName, data.groupRole || "ADMIN");
-    }).catch(err => { errEl.textContent = err.message || "Failed to create group."; errEl.style.display="block"; });
+
+    // Disable button to prevent double-submit
+    if (createBtn) { createBtn.disabled = true; createBtn.textContent = "Creating…"; }
+
+    fetchWithAuth("/api/chat/rooms/group", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ groupName, description, members: [...selectedMembers] })
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.error || "Failed to create group"); });
+        return r.json();
+    })
+    .then(data => {
+        closeGroupModal();
+        switchTab("groups");
+        // The GROUP_CREATED WS push will add the room to the sidebar for all members.
+        // For the creator, also ensure the entry exists immediately (WS may arrive slightly later)
+        // and open the room. Use a short delay so the DB transaction is visible server-side.
+        setTimeout(() => {
+            ensureRoomInList("groupList", data.roomName, data.roomName, "GROUP", data.groupRole || "ADMIN");
+            switchRoom(data.roomName, "GROUP", data.roomName, data.groupRole || "ADMIN");
+        }, 150);
+    })
+    .catch(err => {
+        errEl.textContent = err.message || "Failed to create group.";
+        errEl.style.display = "block";
+    })
+    .finally(() => {
+        if (createBtn) { createBtn.disabled = false; createBtn.textContent = "Create Group"; }
+    });
 }
 
 // ──────────────────────────────────────────────
@@ -1278,12 +1667,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // Refresh UI when returning from another page (e.g. profile) via bfcache
     window.addEventListener("pageshow", e => {
         if (e.persisted) {
-            // Page was restored from bfcache — refresh avatar / display name
             requireAuth().then(ok => {
                 if (!ok) return;
                 setupRoleUI();
+                connectSidebarSocket();   // re-establish sidebar WS after bfcache restore
                 loadPeopleList();
-                // Re-render current chat so updated avatars appear
                 if (currentRoomName) loadChatHistory(currentRoomName);
             });
         }
@@ -1302,7 +1690,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Logout
     document.getElementById("logoutButton")?.addEventListener("click", () => {
+        clearTimeout(_sidebarReconnectTimer);
         if (socket) { socket.onclose = null; socket.close(); }
+        if (sidebarSocket) { sidebarSocket.onclose = null; sidebarSocket.close(); }
         fetch("/api/auth/logout", { method:'POST', credentials:'include' }).finally(() => { clearSession(); window.location.href="/api/v1/login"; });
     });
 

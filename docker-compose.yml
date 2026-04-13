@@ -114,6 +114,25 @@ services:
     networks:
       - chatapp-net
 
+  # ── phpMyAdmin (MySQL Web UI) ─────────────────────────────────
+  # Browse tables, run SQL queries, manage data.
+  # Access at: http://localhost:8081
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: chatapp-phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - chatapp-net
+
   # ── MailHog (local SMTP for dev email testing) ────────────────
   # SMTP:  localhost:1025  |  Web UI: http://localhost:8025
   mailhog:
@@ -150,6 +169,11 @@ services:
       EMAIL_ENABLED: "true"
       APP_BASE_URL:  "http://localhost:8085"
       INSTANCE_ID:  server-1
+      # OAuth2 SSO — values come from .env file (never commit real secrets)
+      GOOGLE_CLIENT_ID:     ${GOOGLE_CLIENT_ID:-YOUR_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-YOUR_GOOGLE_CLIENT_SECRET}
+      GITHUB_CLIENT_ID:     ${GITHUB_CLIENT_ID:-YOUR_GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-YOUR_GITHUB_CLIENT_SECRET}
     depends_on:
       mysql:
         condition: service_healthy

@@ -11,10 +11,10 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Publishes chat message events to the correct Kafka topic based on room type:
- *
+ * <p>
  *   room starts with "dm__"  →  chat-messages-dm     (2 partitions)
  *   any other room name      →  chat-messages-group  (3 partitions)
- *
+ * <p>
  * The partition key is always the roomName, so all messages within a room
  * land on the same partition — guaranteeing order within that room.
  */

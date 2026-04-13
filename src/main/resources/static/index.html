@@ -6,23 +6,43 @@
     <title>ChatApp – Real-time Chat</title>
     <link rel="stylesheet" href="/style.css">
     <style>
-        .landing { text-align: center; padding: 40px 20px; }
-        .landing h1 { font-size: 2em; margin-bottom: 10px; }
-        .landing p  { color: #555; margin-bottom: 30px; }
-        .landing a  { display: inline-block; margin: 8px; padding: 12px 28px;
-                      background: #007BFF; color: #fff; border-radius: 6px;
-                      text-decoration: none; font-size: 1.05em; }
-        .landing a:hover { background: #0056b3; }
-        .landing a.secondary { background: #6c757d; }
-        .landing a.secondary:hover { background: #495057; }
+        body { background: var(--bg-base); display:flex; align-items:center; justify-content:center; min-height:100vh; }
+        .landing {
+            text-align:center; padding:50px 32px; max-width:520px; width:100%;
+            background:var(--bg-layer2); border-radius:var(--radius-lg);
+            border:1px solid var(--border-strong); box-shadow:var(--shadow-lg);
+        }
+        .landing-logo { font-size:3.5em; margin-bottom:16px; display:block; }
+        .landing h1 { font-size:2em; font-weight:800; color:var(--text-heading); margin-bottom:10px; }
+        .landing h1 span { background:linear-gradient(135deg,#8b5cf6,#06b6d4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .landing p  { color:var(--text-muted); margin-bottom:32px; font-size:.95em; line-height:1.6; }
+        .landing-btns { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+        .landing-btn {
+            display:inline-flex; align-items:center; gap:7px;
+            padding:12px 28px; border-radius:10px; text-decoration:none;
+            font-size:.95em; font-weight:600; font-family:inherit; transition:all .2s;
+        }
+        .landing-btn.primary {
+            background:linear-gradient(135deg,#7c3aed,#6d28d9); color:#fff;
+            box-shadow:0 4px 16px rgba(124,58,237,.4);
+        }
+        .landing-btn.primary:hover { background:linear-gradient(135deg,#8b5cf6,#7c3aed); box-shadow:0 6px 24px rgba(124,58,237,.55); transform:translateY(-1px); }
+        .landing-btn.secondary {
+            background:var(--bg-layer3); color:var(--text-secondary);
+            border:1.5px solid var(--border-strong);
+        }
+        .landing-btn.secondary:hover { background:var(--bg-layer4); color:var(--text-primary); border-color:var(--primary-light); }
     </style>
 </head>
 <body>
-<div class="container landing">
-    <h1>💬 ChatApp</h1>
-    <p>Real-time chat with rooms, file sharing, and role management.</p>
-    <a href="/api/v1/login">Login</a>
-    <a href="/api/v1/register" class="secondary">Register</a>
+<div class="landing">
+    <span class="landing-logo">💬</span>
+    <h1><span>ChatApp</span></h1>
+    <p>Real-time messaging with rooms, file sharing, reactions, and role-based management — all in one secure workspace.</p>
+    <div class="landing-btns">
+        <a href="/api/v1/login" class="landing-btn primary">→ Sign In</a>
+        <a href="/api/v1/register" class="landing-btn secondary">Create Account</a>
+    </div>
 </div>
 <script>
     (async function checkExistingSession() {

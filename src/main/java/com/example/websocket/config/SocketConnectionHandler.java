@@ -10,7 +10,7 @@ import com.example.websocket.service.UserProfileService;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.lang.Nullable;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -56,6 +56,9 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         this.userRepository = userRepository;
     }
 
+    /** Virtual room name used by the persistent sidebar WebSocket connection */
+    public static final String SIDEBAR_ROOM = "__sidebar__";
+
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
     @Override
@@ -74,10 +77,13 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         roomSessions.computeIfAbsent(roomName, k -> new CopyOnWriteArraySet<>()).add(session);
         userSessions.computeIfAbsent(username, k -> new CopyOnWriteArraySet<>()).add(session);
 
+        // Sidebar connections: register for pushToUser() but DON'T publish a presence change.
+        // The sidebar socket is a utility channel — it must not trigger ONLINE/OFFLINE events.
+        if (SIDEBAR_ROOM.equals(roomName)) return;
+
         // Publish presence — respect manual status override
         try {
-            userProfileService.setOnline(username);  // no-op if manualStatusOverride=true
-            // Read the user's actual status from DB (may be AWAY/DND if manually set)
+            userProfileService.setOnline(username);
             User dbUser = userRepository.findByUsername(username);
             String actualStatus = (dbUser != null && dbUser.getStatus() != null)
                     ? dbUser.getStatus().name() : "ONLINE";
@@ -95,11 +101,13 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     }
 
     @Override
-    protected void handleTextMessage(@Nullable WebSocketSession session,
-                                     @Nullable TextMessage message) {
+    protected void handleTextMessage(@NonNull WebSocketSession session,
+                                     @NonNull TextMessage message) {
         try {
-            assert message != null;
-            assert session != null;
+            // Sidebar connections are receive-only — ignore any incoming frames
+            String sessionRoom = (String) session.getAttributes().get("roomName");
+            if (SIDEBAR_ROOM.equals(sessionRoom)) return;
+
             JSONObject json = new JSONObject(message.getPayload());
 
             String sender   = (String) session.getAttributes().get("username");
@@ -108,7 +116,6 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
             if (sender == null || sender.isBlank()) return;
             if (roomName == null || roomName.isBlank()) return;
 
-            String sessionRoom = (String) session.getAttributes().get("roomName");
             if (!roomName.equals(sessionRoom)) {
                 log.warn("Security: {} tried to post to {} but connected to {}", sender, roomName, sessionRoom);
                 return;
@@ -228,43 +235,23 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         j.put("roomName",  event.getRoomName());
         j.put("timestamp", event.getTimestamp() != null ? event.getTimestamp().toString() : "");
 
+        // Only MESSAGE, TYPING, READ_RECEIPT flow through broadcastToLocalSessions.
+        // PRESENCE is routed to broadcastPresenceGlobally by the consumer before reaching here.
+        // MESSAGE_EDIT, MESSAGE_DELETE, REACTION, PIN go direct via REST → broadcastJsonToRoom.
+        // NOTIFICATION, UNREAD_COUNT go direct via pushToUser.
         switch (event.getEventType() != null ? event.getEventType() : ChatMessageEvent.EventType.MESSAGE) {
             case TYPING:
                 j.put("isTyping", Boolean.TRUE.equals(event.getIsTyping()));
                 break;
-            case PRESENCE:
-                j.put("presenceStatus", event.getPresenceStatus());
+            case READ_RECEIPT:
+                if (event.getMessageId() != null) j.put("messageId", event.getMessageId());
                 break;
-            case REACTION:
-                j.put("messageId",     event.getMessageId());
-                j.put("reactionEmoji", event.getReactionEmoji());
-                break;
-            case MESSAGE_EDIT:
-                j.put("messageId", event.getMessageId());
-                j.put("content",   event.getContent());
-                break;
-            case MESSAGE_DELETE:
-                j.put("messageId", event.getMessageId());
-                break;
-            case PIN:
-                j.put("messageId", event.getMessageId());
-                break;
-            case NOTIFICATION:
-                j.put("notificationId",    event.getNotificationId());
-                j.put("content",           event.getContent());
-                j.put("recipientUsername", event.getRecipientUsername());
-                break;
-            case UNREAD_COUNT:
-                j.put("roomName",     event.getRoomName());
-                j.put("unreadCount",  event.getContent()); // piggyback count as string
-                break;
-            default:
+            default: // MESSAGE (text or file)
                 j.put("message",  event.getContent());
                 j.put("fileUrl",  event.getFileUrl());
                 j.put("fileType", event.getFileType());
                 j.put("fileName", event.getFileName());
                 if (event.getMessageId() != null) j.put("id", event.getMessageId());
-                // Include full reply-to object for live message display
                 if (event.getReplyToMessageId() != null) {
                     j.put("replyToMessageId", event.getReplyToMessageId());
                     try {
@@ -288,8 +275,7 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
     // ── Connection closed ──────────────────────────────────────────────────
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session,
-                                      @Nullable CloseStatus status) {
+    public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
         String username = (String) session.getAttributes().get("username");
         String roomName = (String) session.getAttributes().get("roomName");
         if (username == null || roomName == null) return;
@@ -298,13 +284,18 @@ public class SocketConnectionHandler extends TextWebSocketHandler {
         removeFromRoom(session, roomName);
         removeFromUser(session, username);
 
-        boolean hasOtherSessions = userRoomSessions.keySet().stream()
-                .anyMatch(k -> k.startsWith(username + "::") && userRoomSessions.get(k) != null
-                               && userRoomSessions.get(k).isOpen());
-        if (!hasOtherSessions) {
+        // Sidebar connections never drive presence — skip offline check entirely
+        if (SIDEBAR_ROOM.equals(roomName)) return;
+
+        // A real room closed — only go OFFLINE when NO other real-room sessions remain
+        boolean hasOtherRealSessions = userRoomSessions.keySet().stream()
+                .anyMatch(k -> k.startsWith(username + "::")
+                        && !k.equals(sessionKey(username, SIDEBAR_ROOM))
+                        && userRoomSessions.get(k) != null
+                        && userRoomSessions.get(k).isOpen());
+        if (!hasOtherRealSessions) {
             try {
-                userProfileService.setOffline(username);  // no-op if manualStatusOverride=true
-                // Read the user's actual status from DB (may still be AWAY/DND if manually set)
+                userProfileService.setOffline(username);
                 User dbUser = userRepository.findByUsername(username);
                 String actualStatus = (dbUser != null && dbUser.getStatus() != null)
                         ? dbUser.getStatus().name() : "OFFLINE";

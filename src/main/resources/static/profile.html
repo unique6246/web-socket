@@ -8,6 +8,27 @@
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <title>Profile – ChatApp</title>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        body { background: var(--bg-base); }
+        .profile-form .form-group input,
+        .profile-form .form-group select,
+        .profile-form .form-group textarea {
+            background: var(--bg-layer3); border-color: var(--border-strong); color: var(--text-primary);
+        }
+        .profile-form .form-group input:focus,
+        .profile-form .form-group select:focus,
+        .profile-form .form-group textarea:focus {
+            border-color: var(--primary-light); background: var(--bg-layer4); box-shadow: var(--shadow-glow);
+        }
+        #addPasswordSection > div {
+            background: rgba(6,182,212,.08) !important; border: 1.5px solid rgba(6,182,212,.25) !important;
+            color: #67e8f9 !important; border-radius: var(--radius-sm) !important; font-size: 14px;
+        }
+        #oauthWithPwInfo {
+            background: rgba(16,185,129,.08) !important; border: 1.5px solid rgba(16,185,129,.25) !important;
+            color: #6ee7b7 !important; border-radius: var(--radius-sm) !important; font-size: 13px;
+        }
+    </style>
 </head>
 <body class="chat-page">
 
@@ -71,11 +92,53 @@
             <button type="submit" class="btn-auth" id="saveProfileBtn">Save Changes</button>
         </form>
 
-        <!-- Change password section -->
+        <!-- Security section -->
         <div class="profile-section-label" style="margin-top:28px;">Security</div>
+
         <div id="pwChangeSuccess" class="success-msg" style="display:none;margin:0 0 10px;"></div>
         <div id="pwChangeError"   class="error-msg"   style="display:none;margin:0 0 10px;"></div>
-        <form id="changePasswordForm" class="profile-form">
+
+        <!--
+            STATE 1 — OAuth user, no local password yet.
+            Shown when: provider is set AND hasPassword is false.
+            Exactly how Facebook / Slack handle it:
+            "You signed in with Google. You can optionally add a password
+             so you can also log in with your email and password."
+            No redirect. No forced prompt. Purely voluntary.
+        -->
+        <div id="addPasswordSection" style="display:none;">
+            <div style="padding:14px 16px;background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:8px;color:#0369a1;font-size:14px;margin-bottom:16px;">
+                🔒 You signed in with <strong id="oauthProviderName"></strong>. Your account is already secured by your provider.
+                <br><span style="color:#475569;font-size:13px;margin-top:4px;display:block;">Optionally, you can add a password below to also sign in with your username and password.</span>
+            </div>
+            <form id="addPasswordForm" class="profile-form">
+                <div class="form-group">
+                    <label for="addPwdNew">New Password</label>
+                    <div class="pw-wrap">
+                        <input type="password" id="addPwdNew" placeholder="Choose a password" autocomplete="new-password" maxlength="128">
+                        <button type="button" class="pw-toggle" onclick="togglePw('addPwdNew', this)" tabindex="-1">👁</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="addPwdConfirm">Confirm Password</label>
+                    <div class="pw-wrap">
+                        <input type="password" id="addPwdConfirm" placeholder="Repeat the password" autocomplete="new-password" maxlength="128">
+                        <button type="button" class="pw-toggle" onclick="togglePw('addPwdConfirm', this)" tabindex="-1">👁</button>
+                    </div>
+                </div>
+                <button type="submit" class="btn-auth" id="addPwBtn">Add Password</button>
+            </form>
+        </div>
+
+        <!--
+            STATE 2 — Username+password user, OR OAuth user who already added a local password.
+            Shown when: hasPassword is true.
+        -->
+        <form id="changePasswordForm" class="profile-form" style="display:none;">
+            <!-- Shown only when the user is OAuth-linked but also has a password -->
+            <div id="oauthWithPwInfo" style="display:none;padding:10px 14px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px;margin-bottom:14px;">
+                ✅ Your account is linked to <strong id="oauthProviderNamePw"></strong> and also has a local password. You can use either to sign in.
+            </div>
             <div class="form-group">
                 <label for="oldPwd">Current Password</label>
                 <div class="pw-wrap">
@@ -111,7 +174,47 @@
     const username = getUsername();
     document.getElementById("loggedInUser").textContent = getDisplayName();
 
-    // Load profile data
+    // ── Fetch /me to determine the correct Security section to render ─────
+    //
+    // Three states — exactly how Facebook / Slack / GitHub handle it:
+    //
+    //  STATE 1: OAuth user, no local password (provider set, hasPassword false)
+    //           → Show "Add a password" section (voluntary, never forced)
+    //           → Info banner: "Your account is secured by Google/GitHub"
+    //           → Optional form to add a password for dual-login capability
+    //
+    //  STATE 2: OAuth user who already added a local password (provider set, hasPassword true)
+    //           → Show "Change Password" form
+    //           → Green info note: "Linked to Google + has a local password"
+    //
+    //  STATE 3: Username+password user (no provider, hasPassword true)
+    //           → Show "Change Password" form — plain, no OAuth info
+    //
+    let me = {};
+    try {
+        const meRes = await fetchWithAuth("/api/auth/me");
+        me = await meRes.json();
+    } catch(e) { /* fallback: show change-password form */ }
+
+    const hasPassword = me.hasPassword === true;
+    const provider    = me.provider || "";
+    const providerName = provider ? (provider.charAt(0).toUpperCase() + provider.slice(1)) : "";
+
+    if (provider && !hasPassword) {
+        // STATE 1 — OAuth, no local password
+        document.getElementById("addPasswordSection").style.display = "block";
+        document.getElementById("oauthProviderName").textContent = providerName;
+    } else {
+        // STATE 2 or STATE 3 — has a password (may or may not be OAuth-linked)
+        document.getElementById("changePasswordForm").style.display = "block";
+        if (provider && hasPassword) {
+            // STATE 2 — OAuth + local password coexist
+            document.getElementById("oauthWithPwInfo").style.display = "block";
+            document.getElementById("oauthProviderNamePw").textContent = providerName;
+        }
+    }
+
+    // Load profile fields
     try {
         const r = await fetchWithAuth(`/api/users/${encodeURIComponent(username)}/profile`);
         const p = await r.json();
@@ -135,23 +238,65 @@
         document.getElementById("profileError").style.display = "block";
     }
 
+
+    // ── Add password (STATE 1 → STATE 2, voluntary for OAuth users) ─────
+    document.getElementById("addPasswordForm")?.addEventListener("submit", async function(e) {
+        e.preventDefault();
+        const newPwd  = document.getElementById("addPwdNew").value;
+        const confirm = document.getElementById("addPwdConfirm").value;
+        const errEl = document.getElementById("pwChangeError");
+        const okEl  = document.getElementById("pwChangeSuccess");
+        errEl.style.display = "none"; okEl.style.display = "none";
+
+        if (newPwd !== confirm) { errEl.textContent = "Passwords do not match."; errEl.style.display = "block"; return; }
+        if (newPwd.length < 8)  { errEl.textContent = "Password must be at least 8 characters."; errEl.style.display = "block"; return; }
+        if (!/[A-Z]/.test(newPwd)) { errEl.textContent = "Password must contain at least one uppercase letter."; errEl.style.display = "block"; return; }
+        if (!/[a-z]/.test(newPwd)) { errEl.textContent = "Password must contain at least one lowercase letter."; errEl.style.display = "block"; return; }
+        if (!/\d/.test(newPwd))    { errEl.textContent = "Password must contain at least one digit."; errEl.style.display = "block"; return; }
+        if (!/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>\/?`~]/.test(newPwd)) { errEl.textContent = "Password must contain at least one special character."; errEl.style.display = "block"; return; }
+
+        const btn = document.getElementById("addPwBtn");
+        btn.disabled = true; btn.textContent = "Saving…";
+        try {
+            await fetchWithAuth("/api/auth/add-password", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ newPassword: newPwd })
+            });
+            okEl.textContent = "✅ Password added! You can now also sign in with your username and password.";
+            okEl.style.display = "block";
+            // Transition to STATE 2 — swap add-password section for change-password form
+            document.getElementById("addPasswordSection").style.display = "none";
+            document.getElementById("oauthWithPwInfo").style.display = "block";
+            document.getElementById("oauthProviderNamePw").textContent = providerName;
+            document.getElementById("changePasswordForm").style.display = "block";
+        } catch(err) {
+            errEl.textContent = err.message;
+            errEl.style.display = "block";
+        }
+        btn.disabled = false; btn.textContent = "Add Password";
+    });
+
     // Save profile
     document.getElementById("profileForm")?.addEventListener("submit", async function(e) {
         e.preventDefault();
         const btn = document.getElementById("saveProfileBtn");
         btn.disabled = true; btn.textContent = "Saving…";
+        const displayName = document.getElementById("pfDisplayName").value.trim();
         try {
-            await fetchWithAuth("/api/auth/update-profile", {
+            await fetchWithAuth("/api/users/me/profile", {
                 method: "PUT",
                 headers: {"Content-Type":"application/json"},
                 body: JSON.stringify({
-                    displayName: document.getElementById("pfDisplayName").value.trim(),
+                    displayName: displayName,
                     bio:         document.getElementById("pfBio").value.trim(),
                     phone:       document.getElementById("pfPhone").value.trim(),
                     status:      document.getElementById("pfStatus").value
                 })
             });
-            sessionStorage.setItem("displayName", document.getElementById("pfDisplayName").value.trim() || username);
+            // Keep sessionStorage in sync so the nav bar reflects the new name immediately
+            if (displayName) sessionStorage.setItem("displayName", displayName);
+            document.getElementById("profileDisplayNameTitle").textContent = displayName || username;
             document.getElementById("profileSuccess").textContent = "Profile updated!";
             document.getElementById("profileSuccess").style.display = "block";
             setTimeout(() => document.getElementById("profileSuccess").style.display = "none", 3000);

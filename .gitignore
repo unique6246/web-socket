@@ -4,8 +4,10 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
-# Secrets — never commit
+# Secrets — never commit the real env file
 .env
+# But the template/example IS safe to commit
+!.env.example
 
 ### STS ###
 .apt_generated

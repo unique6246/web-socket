@@ -34,20 +34,31 @@ public class ChatRoomService {
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, String>> getRoomsWithTypeByUserName(String username) {
+    public List<Map<String, Object>> getRoomsWithTypeByUserName(String username) {
         List<String> roomNames = chatRoomUserRepository.findRoomNamesByUsername(username);
-        List<Map<String, String>> result = new ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>();
         for (String name : roomNames) {
             chatRoomRepository.findByRoomName(name).ifPresent(room -> {
-                Map<String, String> m = new LinkedHashMap<>();
+                Map<String, Object> m = new LinkedHashMap<>();
                 m.put("roomName", room.getRoomName());
                 m.put("type", room.getType() != null ? room.getType() : "GROUP");
-                // include groupRole so sidebar knows admin status immediately
                 if ("GROUP".equals(room.getType())) {
                     boolean isAdmin = room.getChatRoomUsers().stream()
                             .anyMatch(cru -> cru.getUser().getUsername().equals(username) && cru.isGroupAdmin());
                     m.put("groupRole", isAdmin ? "ADMIN" : "MEMBER");
                 }
+                // Include last-message preview so sidebar shows a snippet immediately
+                try {
+                    List<Message> latest = messageRepository.findLatestByRoom(room,
+                            org.springframework.data.domain.PageRequest.of(0, 1));
+                    if (!latest.isEmpty()) {
+                        Message last = latest.get(0);
+                        String preview = last.getContent() != null
+                                ? last.getContent()
+                                : (last.getFileName() != null ? "📎 " + last.getFileName() : "");
+                        m.put("lastMessage", preview);
+                    }
+                } catch (Exception ignored) {}
                 result.add(m);
             });
         }

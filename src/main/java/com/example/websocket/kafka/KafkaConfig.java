@@ -95,9 +95,17 @@ public class KafkaConfig {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        props.put(ProducerConfig.ACKS_CONFIG, "all");           // strongest durability
-        props.put(ProducerConfig.RETRIES_CONFIG, 3);
+        // Strongest durability: wait for all in-sync replicas to ack
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        // Idempotent producer prevents duplicate messages on retry
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        // REQUIRED when idempotence=true: max in-flight requests per connection ≤ 5
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        props.put(ProducerConfig.RETRIES_CONFIG, 3);
+        // Micro-batch: wait up to 5 ms to accumulate messages before sending —
+        // reduces per-message overhead without noticeable latency impact
+        props.put(ProducerConfig.LINGER_MS_CONFIG, 5);
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG, 16384); // 16 KB
         return new DefaultKafkaProducerFactory<>(props);
     }
 
@@ -121,44 +129,46 @@ public class KafkaConfig {
     }
 
     private ConcurrentKafkaListenerContainerFactory<String, ChatMessageEvent>
-    containerFactory(String groupId) {
+    containerFactory(String groupId, int concurrency) {
         ConsumerFactory<String, ChatMessageEvent> cf =
                 new DefaultKafkaConsumerFactory<>(baseConsumerProps(groupId));
         ConcurrentKafkaListenerContainerFactory<String, ChatMessageEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(cf);
+        // Each consumer thread handles one partition — set to match partition count
+        factory.setConcurrency(concurrency);
         return factory;
     }
 
     /**
-     * Fan-out container factory.
-     * Each server supplies its own unique group ID so every instance gets every message.
-     * The actual group ID is resolved at runtime via ${kafka.ws-broadcast.group-id}.
+     * Fan-out container factory — unique group per instance.
+     * Concurrency = max(DM_partitions, GROUP_partitions) = 3 so this instance
+     * can drain all partitions of both topics in parallel.
      */
     @Bean("wsBroadcastContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, ChatMessageEvent>
     wsBroadcastContainerFactory(
             @Value("${kafka.ws-broadcast.group-id:ws-broadcast-default}") String groupId) {
-        return containerFactory(groupId);
+        return containerFactory(groupId, Math.max(TOPIC_DM_PARTITIONS, TOPIC_GROUP_PARTITIONS));
     }
 
     /**
-     * Persistence container factory.
-     * Shared group across all instances → DB write happens exactly once.
+     * Persistence container factory — shared group, exactly-once DB write.
+     * Concurrency = total partitions across both topics (2+3=5).
      */
     @Bean("chatPersistenceContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, ChatMessageEvent>
     chatPersistenceContainerFactory() {
-        return containerFactory("chat-persistence");
+        return containerFactory("chat-persistence", TOPIC_DM_PARTITIONS + TOPIC_GROUP_PARTITIONS);
     }
 
     /**
-     * Push-notification container factory.
-     * Shared group → notification is sent exactly once per message.
+     * Push-notification container factory — shared group, exactly-once push.
+     * Concurrency = total partitions across both topics (2+3=5).
      */
     @Bean("pushNotificationContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, ChatMessageEvent>
     pushNotificationContainerFactory() {
-        return containerFactory("push-notifications");
+        return containerFactory("push-notifications", TOPIC_DM_PARTITIONS + TOPIC_GROUP_PARTITIONS);
     }
 }

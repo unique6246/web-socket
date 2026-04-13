@@ -53,4 +53,9 @@ public class PageController {
     public String profile() {
         return "forward:/profile.html";
     }
+
+    @GetMapping("/kafka-monitor")
+    public String kafkaMonitor() {
+        return "forward:/kafka-monitor.html";
+    }
 }

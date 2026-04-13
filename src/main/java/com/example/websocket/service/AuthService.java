@@ -21,6 +21,9 @@ import java.util.stream.Collectors;
 @Service
 public class AuthService implements UserDetailsService {
 
+    private static final int    MAX_ATTEMPTS   = 5;
+    private static final long   LOCK_MINUTES   = 15;
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -83,9 +86,11 @@ public class AuthService implements UserDetailsService {
         return ResponseEntity.ok(Map.of("message", "User registered successfully. Check your email to verify your account."));
     }
 
+
     @Transactional
     public ResponseEntity<?> verifyEmail(String token) {
-        var optToken = emailVerificationTokenRepository.findByToken(token);
+        // JOIN FETCH keeps the User proxy initialised inside this transaction
+        var optToken = emailVerificationTokenRepository.findByTokenWithUser(token);
         if (optToken.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Invalid verification token."));
         var evt = optToken.get();
         if (evt.isUsed()) return ResponseEntity.badRequest().body(Map.of("error", "Token already used."));
@@ -95,6 +100,8 @@ public class AuthService implements UserDetailsService {
         User user = evt.getUser();
         user.setEmailVerified(true);
         userRepository.save(user);
+        // Send welcome email now that the address is confirmed
+        emailService.sendWelcomeEmail(user);
         return ResponseEntity.ok(Map.of("message", "Email verified successfully. You can now log in."));
     }
 
@@ -136,6 +143,17 @@ public class AuthService implements UserDetailsService {
     public ResponseEntity<?> changePassword(String username, String oldPassword, String newPassword) {
         User user = userRepository.findByUsername(username);
         if (user == null) return ResponseEntity.notFound().build();
+
+        // OAuth users who haven't added a local password yet have an empty password field.
+        // They must use addPasswordToOAuthAccount() first — tell them clearly.
+        boolean hasNoLocalPassword = user.getPassword() == null || user.getPassword().isBlank();
+        if (hasNoLocalPassword) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Your account has no local password. Use 'Add a password' to create one first.",
+                "noPassword", true
+            ));
+        }
+
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Current password is incorrect."));
         }
@@ -145,6 +163,41 @@ public class AuthService implements UserDetailsService {
         userRepository.save(user);
         return ResponseEntity.ok(Map.of("message", "Password changed successfully."));
     }
+
+    /**
+     * Voluntarily adds a local password to an OAuth account that has none yet.
+     * This is entirely optional — exactly how Facebook / Slack handle it.
+     * The account was and remains secured by the OAuth provider;
+     * adding a password simply gives an additional login method.
+     */
+    @Transactional
+    public ResponseEntity<?> addPasswordToOAuthAccount(String username, String newPassword) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return ResponseEntity.notFound().build();
+
+        // Only valid for accounts that have no local password yet
+        boolean hasPassword = user.getPassword() != null && !user.getPassword().isBlank();
+        if (hasPassword) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Your account already has a password. Use 'Change Password' instead."
+            ));
+        }
+        // Must be an OAuth-linked account
+        if (user.getProvider() == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "This endpoint is only for OAuth accounts."
+            ));
+        }
+        String pwdError = validatePasswordStrength(newPassword);
+        if (pwdError != null) return ResponseEntity.badRequest().body(Map.of("error", pwdError));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        return ResponseEntity.ok(Map.of(
+            "message", "Password added. You can now also sign in with your username and password."
+        ));
+    }
+
 
     public ResponseEntity<?> assignRole(String username, String roleName) {
         User user = userRepository.findByUsername(username);
@@ -173,5 +226,57 @@ public class AuthService implements UserDetailsService {
         if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?`~].*"))
             return "Password must contain at least one special character.";
         return null;
+    }
+
+    /**
+     * Record a failed login for this user account.
+     * Locks the account after MAX_ATTEMPTS and sends a lock email.
+     */
+    @Transactional
+    public void recordUserFailure(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return;
+        int attempts = user.getFailedLoginAttempts() + 1;
+        user.setFailedLoginAttempts(attempts);
+        if (attempts >= MAX_ATTEMPTS) {
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(LOCK_MINUTES));
+            userRepository.save(user);
+            emailService.sendAccountLockedEmail(user);
+        } else {
+            userRepository.save(user);
+        }
+    }
+
+    /** Clear failed attempts on successful login */
+    @Transactional
+    public void recordUserSuccess(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return;
+        if (user.getFailedLoginAttempts() > 0 || user.getLockedUntil() != null) {
+            user.setFailedLoginAttempts(0);
+            user.setLockedUntil(null);
+            userRepository.save(user);
+        }
+    }
+
+    /** Returns true if this user account is currently locked */
+    public boolean isUserLocked(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null) return false;
+        if (user.getLockedUntil() == null) return false;
+        if (LocalDateTime.now().isBefore(user.getLockedUntil())) return true;
+        // Lock expired — clear it
+        user.setLockedUntil(null);
+        user.setFailedLoginAttempts(0);
+        userRepository.save(user);
+        return false;
+    }
+
+    /** Seconds remaining until the account lock expires */
+    public long getUserLockedSeconds(String username) {
+        User user = userRepository.findByUsername(username);
+        if (user == null || user.getLockedUntil() == null) return 0;
+        long secs = java.time.Duration.between(LocalDateTime.now(), user.getLockedUntil()).getSeconds();
+        return Math.max(0, secs);
     }
 }

@@ -8,19 +8,63 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://stackpath.bootstrapcdn.com; style-src 'self' 'unsafe-inline' https://stackpath.bootstrapcdn.com; connect-src 'self'; img-src 'self' data:; font-src 'self' https://stackpath.bootstrapcdn.com; object-src 'none'; frame-ancestors 'none';">
   <title>Admin Dashboard – ChatApp</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/style.css">
   <style>
-    .badge-admin { background:#dc3545; color:#fff; padding:2px 8px; border-radius:4px; font-size:.75em; }
-    .badge-moderator { background:#fd7e14; color:#fff; padding:2px 8px; border-radius:4px; font-size:.75em; }
-    .badge-user { background:#0d6efd; color:#fff; padding:2px 8px; border-radius:4px; font-size:.75em; }
-    .stat-card { border:1px solid #dee2e6; border-radius:8px; padding:16px; text-align:center; }
-    .stat-card h3 { font-size:2rem; margin:0; }
+    /* ── Dashboard dark theme ── */
+    body { background:#0d0f17; color:#e8eaf0; font-family:'Inter','Segoe UI',sans-serif; min-height:100vh; display:block; }
+    .navbar { background:#0f1119 !important; border-bottom:1px solid rgba(255,255,255,.08); }
+    .navbar-brand { font-weight:800; font-size:1.05em; color:#f0f2f8 !important; }
+    .container { max-width:none; padding:0 24px; }
+    h4, h5 { color:#f0f2f8 !important; }
+    hr { border-color:rgba(255,255,255,.08); }
+    /* Tables */
+    .table { color:#e8eaf0 !important; background:#1a1e2e; border-color:rgba(255,255,255,.08); }
+    .table-bordered { border-color:rgba(255,255,255,.08) !important; }
+    .table-bordered td,.table-bordered th { border-color:rgba(255,255,255,.08) !important; }
+    .table-hover tbody tr:hover { background:#1f2437 !important; color:#fff !important; }
+    .thead-dark th { background:#0f1119 !important; color:#9ca3b0 !important; border-color:rgba(255,255,255,.1) !important; }
+    /* Form controls */
+    .form-control { background:#1a1e2e !important; border-color:rgba(255,255,255,.12) !important; color:#e8eaf0 !important; }
+    .form-control:focus { background:#1f2437 !important; border-color:#8b5cf6 !important; box-shadow:0 0 0 3px rgba(124,58,237,.2) !important; color:#fff !important; }
+    .form-control::placeholder { color:#5c6375 !important; }
+    select.form-control option { background:#1a1e2e; color:#e8eaf0; }
+    /* Buttons */
+    .btn-primary   { background:#7c3aed !important; border-color:#7c3aed !important; }
+    .btn-primary:hover { background:#8b5cf6 !important; border-color:#8b5cf6 !important; }
+    .btn-success   { background:#10b981 !important; border-color:#10b981 !important; }
+    .btn-success:hover { background:#059669 !important; border-color:#059669 !important; }
+    .btn-danger    { background:#f43f5e !important; border-color:#f43f5e !important; }
+    .btn-warning   { background:#f59e0b !important; border-color:#f59e0b !important; color:#000 !important; }
+    .btn-outline-light { border-color:rgba(255,255,255,.25) !important; color:#e8eaf0 !important; }
+    .btn-outline-light:hover { background:rgba(255,255,255,.1) !important; }
+    .btn-outline-warning { border-color:#f59e0b !important; color:#f59e0b !important; }
+    .btn-outline-warning:hover { background:rgba(245,158,11,.15) !important; }
+    /* Alerts */
+    .alert-danger  { background:rgba(244,63,94,.1) !important; border-color:rgba(244,63,94,.25) !important; color:#fda4af !important; }
+    .alert-success { background:rgba(16,185,129,.1) !important; border-color:rgba(16,185,129,.25) !important; color:#6ee7b7 !important; }
+    /* Tabs */
+    .nav-tabs { border-color:rgba(255,255,255,.1) !important; }
+    .nav-tabs .nav-link { color:#9ca3b0 !important; border-color:transparent !important; }
+    .nav-tabs .nav-link:hover { color:#e8eaf0 !important; border-color:rgba(255,255,255,.1) rgba(255,255,255,.1) transparent !important; background:rgba(255,255,255,.04) !important; }
+    .nav-tabs .nav-link.active { background:#1a1e2e !important; border-color:rgba(255,255,255,.12) rgba(255,255,255,.12) #1a1e2e !important; color:#8b5cf6 !important; }
+    .tab-content { background:#1a1e2e; border:1px solid rgba(255,255,255,.08); border-top:none; border-radius:0 0 8px 8px; padding:20px; }
+    /* Modals */
+    .modal-content { background:#1a1e2e !important; border:1px solid rgba(255,255,255,.12) !important; color:#e8eaf0 !important; }
+    .modal-header { border-color:rgba(255,255,255,.08) !important; }
+    .modal-footer { border-color:rgba(255,255,255,.08) !important; }
+    .modal-title { color:#f0f2f8 !important; }
+    .close { color:#9ca3b0 !important; text-shadow:none !important; }
+    /* Stat cards override */
+    .stat-card { background:#1a1e2e !important; border:1px solid rgba(255,255,255,.1) !important; border-radius:12px; }
+    .stat-card h3 { color:#8b5cf6 !important; font-weight:800; }
   </style>
 </head>
 <body>
-<nav class="navbar navbar-dark bg-dark px-3">
+<nav class="navbar navbar-dark px-3">
   <span class="navbar-brand">🛡 Admin Dashboard</span>
   <div class="d-flex align-items-center" style="gap:10px;">
-    <span id="navUsername" class="text-light" style="font-size:.9em;opacity:.8;"></span>
+    <span id="navUsername" style="font-size:.9em;opacity:.7;color:#9ca3b0;"></span>
+    <a href="/api/v1/kafka-monitor" class="btn btn-outline-warning btn-sm">📡 Kafka Monitor</a>
     <a href="/api/v1/chat" class="btn btn-outline-light btn-sm">← Chat</a>
     <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
   </div>
@@ -171,6 +215,12 @@
     return res;
   }
 
+  // ── XSS-safe escaper for use in the dashboard ──
+  function esc(str) {
+    if (str == null) return "";
+    return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
   // ── Stats ──────────────────────────────────
   async function fetchStats() {
     const res = await authFetch(`${baseUrl}/stats`);
@@ -190,23 +240,23 @@
     tbody.innerHTML = "";
     users.forEach(user => {
       const roleBadges = (user.roles || []).map(r =>
-        `<span class="badge-${r.name.toLowerCase()}">${r.name}</span>`
+        `<span class="badge-${esc(r.name.toLowerCase())}">${esc(r.name)}</span>`
       ).join(" ");
       tbody.insertAdjacentHTML("beforeend", `
         <tr>
-          <td>${user.id}</td>
-          <td>${user.username}</td>
-          <td>${user.email ? `<a href="mailto:${user.email}">${user.email}</a>` : '<span class="text-muted">—</span>'}</td>
+          <td>${esc(user.id)}</td>
+          <td>${esc(user.username)}</td>
+          <td>${user.email ? `<a href="mailto:${esc(user.email)}">${esc(user.email)}</a>` : '<span class="text-muted">—</span>'}</td>
           <td>${roleBadges}</td>
           <td>
-            <select id="roleSelect_${user.id}" class="form-control form-control-sm d-inline" style="width:130px">
+            <select id="roleSelect_${esc(user.id)}" class="form-control form-control-sm d-inline" style="width:130px">
               <option value="USER">USER</option>
               <option value="MODERATOR">MODERATOR</option>
               <option value="ADMIN">ADMIN</option>
             </select>
-            <button class="btn btn-success btn-sm" onclick="assignRole('${user.username}', '${user.id}')">+Role</button>
-            <button class="btn btn-warning btn-sm" onclick="removeRole('${user.username}', '${user.id}')">-Role</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id})">Delete</button>
+            <button class="btn btn-success btn-sm" onclick="assignRole('${esc(user.username)}', '${esc(user.id)}')">+Role</button>
+            <button class="btn btn-warning btn-sm" onclick="removeRole('${esc(user.username)}', '${esc(user.id)}')">-Role</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteUser(${esc(user.id)})">Delete</button>
           </td>
         </tr>`);
     });
@@ -283,11 +333,11 @@
       const memberCount = room.memberCount ?? "–";
       tbody.insertAdjacentHTML("beforeend", `
         <tr>
-          <td>${room.id}</td>
-          <td>${room.roomName}</td>
-          <td>${memberCount}</td>
+          <td>${esc(room.id)}</td>
+          <td>${esc(room.roomName)}</td>
+          <td>${esc(memberCount)}</td>
           <td>
-            <button class="btn btn-danger btn-sm" onclick="deleteChatRoom(${room.id})">Delete</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteChatRoom(${esc(room.id)})">Delete</button>
           </td>
         </tr>`);
     });

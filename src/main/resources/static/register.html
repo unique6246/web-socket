@@ -4,86 +4,250 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-Frame-Options" content="DENY">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; object-src 'none';">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <title>Register – ChatApp</title>
+    <title>Create Account – ChatApp</title>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        body { display:flex; min-height:100vh; margin:0; padding:0; align-items:stretch; justify-content:stretch; }
+
+        .auth-split { display:flex; width:100%; min-height:100vh; }
+
+        /* LEFT — Form panel */
+        .auth-form-panel {
+            width:500px; min-width:360px; display:flex; align-items:flex-start; justify-content:center;
+            background:#0d0f17; padding:48px 44px; overflow-y:auto;
+            border-right: 1px solid rgba(255,255,255,.06);
+        }
+        .auth-form-inner { width:100%; max-width:400px; padding-top:12px; }
+
+        .form-logo-row  { display:flex; align-items:center; gap:10px; margin-bottom:28px; }
+        .form-logo-icon { font-size:1.8em; }
+        .form-logo-name { font-size:1.2em; font-weight:800; color:#f0f2f8; }
+
+        .form-panel-title { font-size:1.55em; font-weight:800; color:#f0f2f8; margin-bottom:4px; }
+        .form-panel-sub   { font-size:.9em; color:#5c6375; margin-bottom:24px; }
+
+        /* SSO */
+        .sso-section { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+        .sso-divider { display:flex; align-items:center; gap:12px; margin:2px 0 18px; color:#5c6375; font-size:.83em; }
+        .sso-divider::before,.sso-divider::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.08); }
+
+        /* Form fields */
+        .reg-form   { display:flex; flex-direction:column; gap:14px; }
+        .field-row  { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .field-label { font-size:.78em; font-weight:700; color:#5c6375; letter-spacing:.4px; text-transform:uppercase; margin-bottom:5px; display:block; }
+        .req { color:#f43f5e; }
+        .field-input {
+            width:100%; padding:11px 14px; border:1.5px solid rgba(255,255,255,.1);
+            border-radius:10px; font-size:.93em; font-family:inherit; outline:none;
+            background:#1a1e2e; color:#e8eaf0; transition:all .2s;
+        }
+        .field-input:focus { border-color:#8b5cf6; background:#1f2437; box-shadow:0 0 0 3px rgba(124,58,237,.2); }
+        .field-input::placeholder { color:#5c6375; }
+        .field-hint { font-size:.76em; color:#5c6375; margin-top:4px; }
+
+        .pw-wrap-reg { position:relative; }
+        .pw-wrap-reg .field-input { padding-right:46px; }
+        .pw-wrap-reg .pw-toggle { position:absolute; right:13px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:.95em; padding:4px; color:#5c6375; transition:color .15s; }
+        .pw-wrap-reg .pw-toggle:hover { color:#9ca3b0; }
+
+        .pw-strength-bar  { height:4px; background:#1f2437; border-radius:2px; margin-top:7px; overflow:hidden; }
+        .pw-strength-fill { height:100%; width:0; border-radius:2px; transition:width .3s,background .3s; }
+        .pw-strength-txt  { font-size:.76em; color:#5c6375; margin-top:4px; height:14px; }
+
+        .btn-register {
+            width:100%; padding:13px;
+            background:linear-gradient(135deg,#7c3aed,#6d28d9);
+            color:#fff; border:none; border-radius:10px;
+            font-size:.98em; font-weight:700; cursor:pointer; font-family:inherit;
+            letter-spacing:.2px; transition:all .2s; margin-top:4px;
+            box-shadow:0 4px 18px rgba(124,58,237,.4);
+        }
+        .btn-register:hover  { background:linear-gradient(135deg,#8b5cf6,#7c3aed); box-shadow:0 6px 26px rgba(124,58,237,.55); transform:translateY(-1px); }
+        .btn-register:active { transform:scale(.98); }
+
+        .switch-hint { text-align:center; font-size:.88em; color:#5c6375; margin-top:20px; }
+        .switch-hint a { color:#8b5cf6; font-weight:700; text-decoration:none; }
+        .switch-hint a:hover { text-decoration:underline; color:#06b6d4; }
+
+        /* RIGHT — Hero */
+        .auth-hero {
+            flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+            background:linear-gradient(150deg,#1a1030 0%,#0f0a20 40%,#0d1520 100%);
+            padding:60px 48px; position:relative; overflow:hidden;
+        }
+        .auth-hero::before {
+            content:''; position:absolute; inset:0;
+            background:radial-gradient(ellipse at 70% 30%, rgba(6,182,212,.18) 0%, transparent 55%),
+                        radial-gradient(ellipse at 30% 70%, rgba(124,58,237,.2) 0%, transparent 55%);
+            pointer-events:none;
+        }
+        .hero-inner   { position:relative; z-index:1; max-width:360px; text-align:center; }
+        .hero-icon    { font-size:4em; margin-bottom:20px; display:block; }
+        .hero-title   { font-size:2em; font-weight:800; color:#f0f2f8; margin-bottom:12px; line-height:1.2; }
+        .hero-title span { background:linear-gradient(135deg,#06b6d4,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .hero-sub     { font-size:1em; color:rgba(255,255,255,.6); line-height:1.7; max-width:310px; margin:0 auto; }
+        .hero-steps   { display:flex; flex-direction:column; gap:12px; margin-top:36px; width:100%; }
+        .hero-step    {
+            display:flex; align-items:flex-start; gap:14px;
+            background:rgba(255,255,255,.05); border-radius:12px;
+            padding:14px 18px; border:1px solid rgba(255,255,255,.08);
+            backdrop-filter:blur(4px); text-align:left;
+        }
+        .step-num  { width:26px; height:26px; border-radius:50%; background:rgba(124,58,237,.35); color:#c4b5fd; font-size:.85em; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+        .step-text { color:rgba(255,255,255,.8); font-size:.9em; line-height:1.45; }
+        .step-text strong { color:#fff; display:block; margin-bottom:2px; }
+
+        @media(max-width:900px) {
+            .auth-hero { display:none; }
+            .auth-form-panel { width:100%; min-width:0; padding:36px 24px; border-right:none; }
+        }
+        @media(max-width:480px) {
+            .auth-form-panel { padding:24px 16px; }
+            .field-row { grid-template-columns:1fr; }
+        }
+    </style>
 </head>
 <body>
-<div class="auth-wrap">
-    <div class="auth-card">
-        <div class="auth-logo">💬</div>
-        <h1 class="auth-title">Create Account</h1>
-        <p class="auth-sub">Join ChatApp and start chatting</p>
+<div class="auth-split">
 
-        <div id="registerError" class="error-msg" style="display:none;"></div>
-        <div id="registerSuccess" class="success-msg" style="display:none;"></div>
+    <!-- ── LEFT: Form panel ── -->
+    <div class="auth-form-panel">
+        <div class="auth-form-inner">
 
-        <form id="registerForm" class="auth-form" novalidate>
-            <div class="form-group">
-                <label for="newUsername">Username <span class="req">*</span></label>
-                <input type="text" id="newUsername" placeholder="3–50 chars, letters/numbers/_.-" required
-                       autocomplete="username" maxlength="50" minlength="3"
-                       pattern="^[a-zA-Z0-9_.\-]+$">
-                <div class="field-hint">Letters, numbers, underscores, dots, hyphens only</div>
+            <div class="form-logo-row">
+                <span class="form-logo-icon">💬</span>
+                <span class="form-logo-name">ChatApp</span>
             </div>
-            <div class="form-group">
-                <label for="newDisplayName">Display Name</label>
-                <input type="text" id="newDisplayName" placeholder="How others see you (optional)" maxlength="80">
+
+            <h2 class="form-panel-title">Create account</h2>
+            <p class="form-panel-sub">Free forever — no credit card needed</p>
+
+            <div id="registerError"   class="error-msg"   style="display:none;margin-bottom:14px;"></div>
+            <div id="registerSuccess" class="success-msg" style="display:none;margin-bottom:14px;"></div>
+
+            <!-- SSO -->
+            <div class="sso-section">
+                <a href="/oauth2/authorization/google" class="btn-sso">
+                    <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+                    Sign up with Google
+                </a>
+                <a href="/oauth2/authorization/github" class="btn-sso">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="#e8eaf0"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                    Sign up with GitHub
+                </a>
             </div>
-            <div class="form-group">
-                <label for="newEmail">Email <span class="req">*</span></label>
-                <input type="email" id="newEmail" placeholder="you@example.com" required autocomplete="email" maxlength="100">
-            </div>
-            <div class="form-group">
-                <label for="newPhone">Phone (optional)</label>
-                <input type="tel" id="newPhone" placeholder="+1 555 000 0000" maxlength="20">
-            </div>
-            <div class="form-group">
-                <label for="newPassword">Password <span class="req">*</span></label>
-                <div class="pw-wrap">
-                    <input type="password" id="newPassword" placeholder="Min 8 chars with uppercase, digit, symbol"
-                           required autocomplete="new-password" maxlength="128">
-                    <button type="button" class="pw-toggle" onclick="togglePw('newPassword', this)" tabindex="-1">👁</button>
+
+            <div class="sso-divider"><span>or register with email</span></div>
+
+            <form id="registerForm" class="reg-form" novalidate>
+
+                <div class="field-row">
+                    <div>
+                        <label class="field-label" for="newUsername">Username <span class="req">*</span></label>
+                        <input class="field-input" type="text" id="newUsername"
+                               placeholder="e.g. john_doe" required autocomplete="username"
+                               maxlength="50" minlength="3" pattern="^[a-zA-Z0-9_.\-]+$">
+                        <div class="field-hint">Letters, numbers, _ . - only</div>
+                    </div>
+                    <div>
+                        <label class="field-label" for="newDisplayName">Display Name</label>
+                        <input class="field-input" type="text" id="newDisplayName"
+                               placeholder="How others see you" maxlength="80">
+                    </div>
                 </div>
-                <div class="pw-strength-bar"><div id="pwStrengthFill" class="pw-strength-fill"></div></div>
-                <div id="pwStrengthLabel" class="field-hint"></div>
-            </div>
-            <div class="form-group">
-                <label for="confirmPassword">Confirm Password <span class="req">*</span></label>
-                <div class="pw-wrap">
-                    <input type="password" id="confirmPassword" placeholder="Repeat your password"
-                           required autocomplete="new-password" maxlength="128">
-                    <button type="button" class="pw-toggle" onclick="togglePw('confirmPassword', this)" tabindex="-1">👁</button>
-                </div>
-            </div>
-            <button type="submit" class="btn-auth" id="registerBtn">Create Account</button>
-        </form>
 
-        <div class="auth-divider"><span>or</span></div>
-        <p class="auth-switch">Already have an account? <a href="/api/v1/login">Sign in</a></p>
+                <div>
+                    <label class="field-label" for="newEmail">Email <span class="req">*</span></label>
+                    <input class="field-input" type="email" id="newEmail"
+                           placeholder="you@example.com" required autocomplete="email" maxlength="100">
+                </div>
+
+                <div>
+                    <label class="field-label" for="newPhone">Phone <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#5c6375;">(optional)</span></label>
+                    <input class="field-input" type="tel" id="newPhone"
+                           placeholder="+1 555 000 0000" maxlength="20">
+                </div>
+
+                <div>
+                    <label class="field-label" for="newPassword">Password <span class="req">*</span></label>
+                    <div class="pw-wrap-reg">
+                        <input class="field-input" type="password" id="newPassword"
+                               placeholder="Min 8 chars, uppercase, digit, symbol"
+                               required autocomplete="new-password" maxlength="128">
+                        <button type="button" class="pw-toggle" onclick="togglePw('newPassword', this)" tabindex="-1">👁</button>
+                    </div>
+                    <div class="pw-strength-bar"><div id="pwStrengthFill" class="pw-strength-fill"></div></div>
+                    <div id="pwStrengthLabel" class="pw-strength-txt"></div>
+                </div>
+
+                <div>
+                    <label class="field-label" for="confirmPassword">Confirm Password <span class="req">*</span></label>
+                    <div class="pw-wrap-reg">
+                        <input class="field-input" type="password" id="confirmPassword"
+                               placeholder="Repeat your password"
+                               required autocomplete="new-password" maxlength="128">
+                        <button type="button" class="pw-toggle" onclick="togglePw('confirmPassword', this)" tabindex="-1">👁</button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-register" id="registerBtn">Create Account →</button>
+            </form>
+
+            <p class="switch-hint">Already have an account? <a href="/api/v1/login">Sign in</a></p>
+
+        </div>
     </div>
+
+    <!-- ── RIGHT: Hero panel ── -->
+    <div class="auth-hero">
+        <div class="hero-inner">
+            <span class="hero-icon">✨</span>
+            <h1 class="hero-title">Join <span>ChatApp</span></h1>
+            <p class="hero-sub">Set up your account in under 60 seconds and start chatting with your team.</p>
+            <div class="hero-steps">
+                <div class="hero-step">
+                    <div class="step-num">1</div>
+                    <div class="step-text"><strong>Create your account</strong>Fill in your details or use Google / GitHub</div>
+                </div>
+                <div class="hero-step">
+                    <div class="step-num">2</div>
+                    <div class="step-text"><strong>Verify your email</strong>Click the link we send to activate your account</div>
+                </div>
+                <div class="hero-step">
+                    <div class="step-num">3</div>
+                    <div class="step-text"><strong>Start chatting</strong>DM teammates, create groups, share files — instantly</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
+
 <script src="/script.js"></script>
 <script>
-    // Live password strength meter
     document.getElementById("newPassword")?.addEventListener("input", function() {
         const fill  = document.getElementById("pwStrengthFill");
         const label = document.getElementById("pwStrengthLabel");
         const v = this.value;
         let score = 0;
-        if (v.length >= 8)  score++;
-        if (/[A-Z]/.test(v)) score++;
-        if (/[a-z]/.test(v)) score++;
-        if (/\d/.test(v))    score++;
-        if (/[^a-zA-Z0-9]/.test(v)) score++;
-        const pct   = (score / 5) * 100;
-        const colors = ["", "#ef4444","#f97316","#eab308","#22c55e","#16a34a"];
-        const labels = ["", "Very Weak","Weak","Fair","Strong","Very Strong"];
-        fill.style.width = pct + "%";
-        fill.style.background = colors[score] || "#e2e8f0";
-        label.textContent = score > 0 ? labels[score] : "";
-        label.style.color = colors[score] || "#94a3b8";
+        if (v.length >= 8)           score++;
+        if (/[A-Z]/.test(v))         score++;
+        if (/[a-z]/.test(v))         score++;
+        if (/\d/.test(v))            score++;
+        if (/[^a-zA-Z0-9]/.test(v))  score++;
+        const pct    = (score / 5) * 100;
+        const colors = ["","#f43f5e","#f97316","#eab308","#10b981","#059669"];
+        const labels = ["","Very Weak","Weak","Fair","Strong","Very Strong"];
+        fill.style.width      = pct + "%";
+        fill.style.background = colors[score] || "#1f2437";
+        label.textContent     = score > 0 ? labels[score] : "";
+        label.style.color     = colors[score] || "#5c6375";
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+        document.getElementById("registerForm")?.addEventListener("submit", handleRegister);
     });
 </script>
 </body>

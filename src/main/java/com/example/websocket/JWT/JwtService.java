@@ -1,6 +1,5 @@
 package com.example.websocket.JWT;
 
-import com.example.websocket.repo.UserRepository;
 import com.example.websocket.service.AuthService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,14 +14,12 @@ public class JwtService {
 
     private final JwtUtil jwtUtil;
     private final AuthService authService;
-    private final UserRepository userRepository;
     private final TokenBlacklistService blacklistService;
 
     public JwtService(JwtUtil jwtUtil, @Lazy AuthService authService,
-                      UserRepository userRepository, TokenBlacklistService blacklistService) {
+                      TokenBlacklistService blacklistService) {
         this.jwtUtil = jwtUtil;
         this.authService = authService;
-        this.userRepository = userRepository;
         this.blacklistService = blacklistService;
     }
 
@@ -44,9 +41,11 @@ public class JwtService {
 
     public boolean validateToken(String token) {
         try {
+            // 1. Blacklist check (in-memory — fast, O(1))
             if (blacklistService.isBlacklisted(token)) return false;
+            // 2. Signature + expiry check (CPU only — no I/O)
             String username = jwtUtil.extractUsername(token);
-            return username != null && userRepository.existsByUsername(username) && !jwtUtil.isTokenExpired(token);
+            return username != null && !username.isBlank() && !jwtUtil.isTokenExpired(token);
         } catch (Exception e) {
             return false;
         }
